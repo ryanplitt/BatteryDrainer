@@ -10,9 +10,22 @@
 		FB45B01B2D98FB3900B2BDF5 /* BatteryDrain.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BatteryDrain.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		FB3F75762DA31EC700C9B709 /* Exceptions for "BatteryDrain" folder in "BatteryDrain" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = FB45B01A2D98FB3900B2BDF5 /* BatteryDrain */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		FB45B01D2D98FB3900B2BDF5 /* BatteryDrain */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				FB3F75762DA31EC700C9B709 /* Exceptions for "BatteryDrain" folder in "BatteryDrain" target */,
+			);
 			path = BatteryDrain;
 			sourceTree = "<group>";
 		};
@@ -255,8 +268,11 @@
 				DEVELOPMENT_TEAM = DZBZX9Z7XW;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BatteryDrain/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Some Bluetooth Description";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Some Description";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Description for Location";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone Description";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -287,8 +303,11 @@
 				DEVELOPMENT_TEAM = DZBZX9Z7XW;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BatteryDrain/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Some Bluetooth Description";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Some Description";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Description for Location";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Microphone Description";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
