@@ -167,10 +167,22 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     lazy var aggressiveSession: URLSession = {
         let config = URLSessionConfiguration.default
         // Increase the number of allowed concurrent connections.
-        config.httpMaximumConnectionsPerHost = 20 // Keep this high for aggressive mode
-        config.timeoutIntervalForRequest = 20 // Shorter timeout for aggressive mode
-        config.timeoutIntervalForResource = 20
+        config.httpMaximumConnectionsPerHost = 50 // Keep this high for aggressive mode
+        config.timeoutIntervalForRequest = 40 // Shorter timeout for aggressive mode
+        config.timeoutIntervalForResource = 40
         return URLSession(configuration: config)
+    }()
+    
+    lazy var uploadQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 5  // Limit to 5 concurrent uploads
+        return queue
+    }()
+    
+    lazy var downloadQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 5  // Limit to 5 concurrent downloads
+        return queue
     }()
     
     // MARK: Max Brightness & Flashlight
@@ -365,45 +377,65 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     // MARK: Network Requests (Download)
     func startNetworkRequests() {
-        networkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            self.makeNetworkRequest()
+        // Cancel any existing operations.
+        downloadQueue.cancelAllOperations()
+        // Set the maximum concurrent operations based on aggressive mode.
+        downloadQueue.maxConcurrentOperationCount = aggressiveMode ? 10 : 1
+        // Start the desired number of operations.
+        let desiredCount = aggressiveMode ? 10 : 1
+        for _ in 0..<desiredCount {
+            addDownloadOperation()
         }
+        print("Started continuous queued Download Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
     }
-    
+
+    private func addDownloadOperation() {
+        let op = BlockOperation { [weak self] in
+            guard let self = self else { return }
+            // Use a semaphore so that the operation doesn’t finish until the network call is done.
+            let semaphore = DispatchSemaphore(value: 0)
+            self.makeNetworkRequest {
+                semaphore.signal()
+            }
+            semaphore.wait()
+            // Once done, if the queue is still active, add another operation to keep the desired count.
+            if !self.downloadQueue.isSuspended && !self.downloadQueue.operations.contains(where: { $0.isCancelled }) {
+                self.addDownloadOperation()
+            }
+        }
+        downloadQueue.addOperation(op)
+    }
+
     func stopNetworkRequests() {
-        networkTimer?.invalidate()
-        networkTimer = nil
+        downloadQueue.cancelAllOperations()
+        print("Stopped continuous Download Requests")
     }
     
-    func makeNetworkRequest() {
-        // Use home server for aggressive mode; otherwise use Picsum.
+    func makeNetworkRequest(completion: @escaping () -> Void) {
         let randomValue = Int.random(in: 0...100000)
         let urlString: String
-        let session: URLSession // Choose session based on mode
-        
+        let session: URLSession
+
         if aggressiveMode {
-            // Use local server for aggressive mode downloads too
             urlString = "http://192.168.0.80:3434/download"
-            session = aggressiveSession // Use the high-concurrency session
+            session = aggressiveSession
             print("Aggressive Download Request to \(urlString)")
         } else {
-            // Use a large image size for standard mode too
-            urlString = "https://picsum.photos/3000/3000?random=\(randomValue)" // Larger image
-            session = URLSession.shared // Standard session
+            urlString = "https://picsum.photos/3000/3000?random=\(randomValue)"
+            session = URLSession.shared
             print("Standard Download Request to \(urlString)")
         }
-        
+
         guard let url = URL(string: urlString) else {
             print("Invalid URL: \(urlString)")
+            completion()
             return
         }
-        
+
         var request = URLRequest(url: url)
-        request.cachePolicy = .reloadIgnoringLocalCacheData // Crucial to actually download
-        
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         let task = session.dataTask(with: request) { data, response, error in
             if let error = error {
-                // Handle specific errors if needed (e.g., timeout, server unavailable)
                 if let urlError = error as? URLError, urlError.code == .timedOut {
                     print("Download timed out.")
                 } else {
@@ -412,51 +444,76 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             } else if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
                 print("Download failed with status code: \(httpResponse.statusCode)")
             } else {
-                // Success - data is downloaded but we don't need to process it
                 print("Downloaded \(data?.count ?? 0) bytes successfully.")
             }
-            // Data is automatically discarded when this closure finishes
+            // Call completion to signal that the operation is finished.
+            completion()
         }
         task.resume()
     }
     
     
     // MARK: Upload Requests
-    func startUploadRequests() {
-        // In aggressive mode, reduce interval and increase payload size.
-        let interval: TimeInterval = aggressiveMode ? 0.25 : 1.0
-        let payloadSize = aggressiveMode ? 25_000_000 : 5_000_000
-        
-        uploadTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-            // Choose the correct URL based on aggressiveMode
-            let urlString: String
-            if self.aggressiveMode {
-                // Replace with your Mac mini's local upload endpoint
-                urlString = "http://192.168.0.80:3434/upload"
-            } else {
-                urlString = "https://httpbin.org/post"
-            }
-            
-            guard let url = URL(string: urlString) else { return }
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            
-            let data = Data(repeating: 0xDE, count: payloadSize)
-            
-            let task = self.aggressiveSession.uploadTask(with: request, from: data) { data, response, error in
-                if let error = error {
-                    print("Upload error: \(error)")
-                } else {
-                    print("Upload succeeded")
-                }
-            }
-            task.resume()
+    func makeUploadRequest(completion: @escaping () -> Void) {
+        let urlString: String
+        if aggressiveMode {
+            urlString = "http://192.168.0.80:3434/upload"
+        } else {
+            urlString = "https://httpbin.org/post"
         }
+        guard let url = URL(string: urlString) else {
+            completion()
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        
+        let payloadSize = aggressiveMode ? 30_000_000 : 5_000_000
+        let data = Data(repeating: 0xDE, count: payloadSize)
+        
+        let session = aggressiveMode ? aggressiveSession : URLSession.shared
+        let task = session.uploadTask(with: request, from: data) { data, response, error in
+            if let error = error {
+                print("Upload error: \(error.localizedDescription)")
+            } else {
+                print("Upload succeeded for \(payloadSize) bytes.")
+            }
+            completion()
+        }
+        task.resume()
     }
     
+    func startUploadRequests() {
+        // Cancel any existing upload operations.
+        uploadQueue.cancelAllOperations()
+        // Set the maximum concurrent operations.
+        uploadQueue.maxConcurrentOperationCount = aggressiveMode ? 10 : 1
+        let desiredCount = aggressiveMode ? 10 : 1
+        for _ in 0..<desiredCount {
+            addUploadOperation()
+        }
+        print("Started continuous queued Upload Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
+    }
+
+    private func addUploadOperation() {
+        let op = BlockOperation { [weak self] in
+            guard let self = self else { return }
+            let semaphore = DispatchSemaphore(value: 0)
+            self.makeUploadRequest {
+                semaphore.signal()
+            }
+            semaphore.wait()
+            if !self.uploadQueue.isSuspended && !self.uploadQueue.operations.contains(where: { $0.isCancelled }) {
+                self.addUploadOperation()
+            }
+        }
+        uploadQueue.addOperation(op)
+    }
+
     func stopUploadRequests() {
-        uploadTimer?.invalidate()
-        uploadTimer = nil
+        uploadQueue.cancelAllOperations()
+        print("Stopped continuous Upload Requests")
     }
     
     // MARK: Camera Capture
@@ -783,15 +840,15 @@ struct ContentView: View {
     func backgroundColor(for state: ProcessInfo.ThermalState) -> Color {
         switch state {
         case .nominal:
-            return Color.green.opacity(0.1)
+            return Color.green
         case .fair:
-            return Color.yellow.opacity(0.1)
+            return Color.yellow
         case .serious:
-            return Color.orange.opacity(0.1)
+            return Color.orange
         case .critical:
-            return Color.red.opacity(0.1)
+            return Color.red
         @unknown default:
-            return Color.gray.opacity(0.1)
+            return Color.gray
         }
     }
     
@@ -810,7 +867,7 @@ struct ContentView: View {
                         Text("Thermal State: \(thermalState)")
                             .font(.headline)
                             .padding()
-                            .background(backgroundColor(for: thermalState))
+                            .foregroundColor(backgroundColor(for: thermalState))
                         // Aggressive Mode Toggle (Top)
                         Toggle("Aggressive Mode (Max Network/CPU)", isOn: $aggressiveModeEnabled)
                             .font(.headline)
