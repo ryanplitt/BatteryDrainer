@@ -173,18 +173,6 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         return URLSession(configuration: config)
     }()
     
-    lazy var uploadQueue: OperationQueue = {
-        let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 5  // Limit to 5 concurrent uploads
-        return queue
-    }()
-    
-    lazy var downloadQueue: OperationQueue = {
-        let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 5  // Limit to 5 concurrent downloads
-        return queue
-    }()
-    
     // MARK: Max Brightness & Flashlight
     func startBrightnessAndFlashlight() {
         UIScreen.main.brightness = 1.0
@@ -377,63 +365,18 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     // MARK: Network Requests (Download)
     func startNetworkRequests() {
-        // Set maximum concurrent downloads based on aggressive mode
-        downloadQueue.maxConcurrentOperationCount = aggressiveMode ? 5 : 1
-        // Cancel any existing operations
-        downloadQueue.cancelAllOperations()
-        // Start by enqueuing the full batch
-        let desiredCount = aggressiveMode ? 5 : 1
-        addDownloadOperation(numberOfOperations: desiredCount)
-        print("Started continuous queued Download Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
-    }
-    
-    private func addDownloadOperation(numberOfOperations: Int = 1) {
-        for _ in 0..<numberOfOperations {
-            let op = BlockOperation { [weak self] in
-                guard let self = self else { return }
-                let randomValue = Int.random(in: 0...100000)
-                let urlString = self.aggressiveMode
-                    ? "http://192.168.0.80:3434/download"
-                    : "https://picsum.photos/3000/3000?random=\(randomValue)"
-                guard let url = URL(string: urlString) else { return }
-                
-                var request = URLRequest(url: url)
-                request.cachePolicy = .reloadIgnoringLocalCacheData
-                let session: URLSession = self.aggressiveMode ? self.aggressiveSession : URLSession.shared
-                
-                let task = session.dataTask(with: request) { data, response, error in
-                    if let error = error {
-                        print("Download error: \(error.localizedDescription)")
-                    } else {
-                        print("Downloaded \(data?.count ?? 0) bytes successfully.")
-                    }
-                    // After the task completes, check whether we need to add a new operation
-                    DispatchQueue.main.async {
-                        self.maintainDownloadOperationCount()
-                    }
-                }
-                task.resume()
-            }
-            self.downloadQueue.addOperation(op)
-        }
-    }
-    
-    private func maintainDownloadOperationCount() {
-        let desiredCount = aggressiveMode ? 5 : 1
-        // Count operations that are not finished or cancelled
-        let unfinishedCount = downloadQueue.operations.filter { !$0.isFinished && !$0.isCancelled }.count
-        if unfinishedCount < desiredCount {
-            let numberToAdd = desiredCount - unfinishedCount
-            addDownloadOperation(numberOfOperations: numberToAdd)
+        networkTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            self.makeNetworkRequest()
         }
     }
     
     func stopNetworkRequests() {
-        downloadQueue.cancelAllOperations()
-        print("Stopped continuous Download Requests")
+        networkTimer?.invalidate()
+        networkTimer = nil
     }
-    // MARK: Modified - Network Download Request
+    
     func makeNetworkRequest() {
+        // Use home server for aggressive mode; otherwise use Picsum.
         let randomValue = Int.random(in: 0...100000)
         let urlString: String
         let session: URLSession // Choose session based on mode
@@ -480,59 +423,40 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     // MARK: Upload Requests
     func startUploadRequests() {
-        // Set maximum concurrent operations based on aggressive mode
-        uploadQueue.maxConcurrentOperationCount = aggressiveMode ? 5 : 1
-        // Cancel any existing operations
-        uploadQueue.cancelAllOperations()
-        // Start by enqueuing the full batch (5 for aggressive mode, 1 otherwise)
-        let desiredCount = aggressiveMode ? 5 : 1
-        addUploadOperation(numberOfOperations: desiredCount)
-        print("Started continuous queued Upload Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
-    }
-    
-    private func addUploadOperation(numberOfOperations: Int = 1) {
-        for _ in 0..<numberOfOperations {
-            let op = BlockOperation { [weak self] in
-                guard let self = self else { return }
-                let urlString = self.aggressiveMode
-                    ? "http://192.168.0.80:3434/upload"
-                    : "https://httpbin.org/post"
-                guard let url = URL(string: urlString) else { return }
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-                let payloadSize = self.aggressiveMode ? 25_000_000 : 5_000_000
-                let data = Data.randomData(length: payloadSize)
-                let sessionToUse: URLSession = self.aggressiveMode ? self.aggressiveSession : URLSession.shared
-                let task = sessionToUse.uploadTask(with: request, from: data) { data, response, error in
-                    if let error = error {
-                        print("Upload error: \(error.localizedDescription)")
-                    } else {
-                        print("Upload succeeded for \(payloadSize) bytes.")
-                    }
-                    // After the task completes, check whether we need to "top off" the queue
-                    DispatchQueue.main.async {
-                        self.maintainUploadOperationCount()
-                    }
-                }
-                task.resume()
+        // In aggressive mode, reduce interval and increase payload size.
+        let interval: TimeInterval = aggressiveMode ? 0.25 : 1.0
+        let payloadSize = aggressiveMode ? 25_000_000 : 5_000_000
+        
+        uploadTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            // Choose the correct URL based on aggressiveMode
+            let urlString: String
+            if self.aggressiveMode {
+                // Replace with your Mac mini's local upload endpoint
+                urlString = "http://192.168.0.80:3434/upload"
+            } else {
+                urlString = "https://httpbin.org/post"
             }
-            self.uploadQueue.addOperation(op)
-        }
-    }
-    
-    private func maintainUploadOperationCount() {
-        let desiredCount = aggressiveMode ? 5 : 1
-        let unfinishedCount = uploadQueue.operations.filter { !$0.isFinished && !$0.isCancelled }.count
-        if unfinishedCount < desiredCount {
-            let numberToAdd = desiredCount - unfinishedCount
-            addUploadOperation(numberOfOperations: numberToAdd)
+            
+            guard let url = URL(string: urlString) else { return }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            
+            let data = Data(repeating: 0xDE, count: payloadSize)
+            
+            let task = self.aggressiveSession.uploadTask(with: request, from: data) { data, response, error in
+                if let error = error {
+                    print("Upload error: \(error)")
+                } else {
+                    print("Upload succeeded")
+                }
+            }
+            task.resume()
         }
     }
     
     func stopUploadRequests() {
-        uploadQueue.cancelAllOperations()
-        print("Stopped continuous Upload Requests")
+        uploadTimer?.invalidate()
+        uploadTimer = nil
     }
     
     // MARK: Camera Capture
