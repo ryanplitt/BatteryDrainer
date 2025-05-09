@@ -269,10 +269,17 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         locationManager = CLLocationManager()
         locationManager?.delegate = self
         locationManager?.desiredAccuracy = kCLLocationAccuracyBestForNavigation
-        locationManager?.requestAlwaysAuthorization() // Or requestWhenInUseAuthorization()
-        locationManager?.allowsBackgroundLocationUpdates = true // Keep running in background if needed
-        locationManager?.startUpdatingLocation()
-        print("Started Location Updates")
+        locationManager?.allowsBackgroundLocationUpdates = true
+
+        let status = CLLocationManager.authorizationStatus()
+
+        if status == .notDetermined {
+            locationManager?.requestAlwaysAuthorization() // or requestWhenInUseAuthorization()
+        } else if status == .authorizedAlways || status == .authorizedWhenInUse {
+            locationManager?.startUpdatingLocation()
+        } else {
+            print("Location permission not granted")
+        }
     }
     
     func stopLocationUpdates() {
@@ -290,6 +297,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             print("Started Bluetooth Scanning")
         } else if centralManager?.state == .poweredOn {
             centralManager?.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]) // Scan aggressively
+            centralManager?.delegate = self
             print("Restarted Bluetooth Scan")
         }
     }
@@ -312,7 +320,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         let format = output.inputFormat(forBus: 0)
         let sourceNode = AVAudioSourceNode { _, _, frameCount, audioBufferList -> OSStatus in
             let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            let thetaIncrement = 2.0 * Double.pi * 440.0 / format.sampleRate
+            let thetaIncrement = 2.0 * Double.pi * 100.0 / format.sampleRate
             var theta: Double = 0
             for frame in 0..<Int(frameCount) {
                 let sampleVal = Float(sin(theta))
@@ -749,7 +757,10 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
             print("Location authorization granted.")
-            manager.startUpdatingLocation() // Ensure updates start if previously denied
+            if self.locationManager?.delegate == nil {
+                self.locationManager?.delegate = self
+            }
+            self.locationManager?.startUpdatingLocation()
         case .denied, .restricted:
             print("Location authorization denied or restricted.")
             stopLocationUpdates() // Stop trying if denied
