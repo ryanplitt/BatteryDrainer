@@ -1,183 +1,13 @@
+import Foundation
 import SwiftUI
 import AVFoundation
 import CoreLocation
 import CoreBluetooth
-import AVKit
-import ARKit
-import CoreImage
-import MetalKit
+import UIKit
 import Security
-
-// MARK: - IntenseAnimatedView
-struct CrazyParticleBackgroundView: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.backgroundColor = .black // for contrast
-        
-        let emitter = CAEmitterLayer()
-        emitter.frame = view.bounds
-        emitter.emitterShape = .line
-        emitter.emitterPosition = CGPoint(x: view.bounds.midX, y: view.bounds.maxY)
-        emitter.emitterSize = CGSize(width: view.bounds.width, height: 1)
-        
-        // Create multiple emitter cells for a crazy effect
-        var cells: [CAEmitterCell] = []
-        for _ in 0..<10 {
-            let cell = CAEmitterCell()
-            // Create a white circle programmatically
-            let size = CGSize(width: 10, height: 10)
-            let renderer = UIGraphicsImageRenderer(size: size)
-            let image = renderer.image { ctx in
-                UIColor.white.setFill()
-                ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
-            }
-            cell.contents = image.cgImage
-            
-            cell.birthRate = 50
-            cell.lifetime = 5.0
-            cell.velocity = CGFloat.random(in: 100...200)
-            cell.velocityRange = 50
-            cell.emissionLongitude = -CGFloat.pi/2
-            cell.emissionRange = CGFloat.pi/4
-            cell.scale = CGFloat.random(in: 0.1...0.2)
-            cell.scaleRange = 0.1
-            cell.alphaSpeed = -0.2
-            cell.spin = CGFloat.random(in: -2...2)
-            cells.append(cell)
-        }
-        
-        emitter.emitterCells = cells
-        
-        // Optional: Animate the birth rate to add intensity
-        let animation = CABasicAnimation(keyPath: "birthRate")
-        animation.fromValue = 50
-        animation.toValue = 100
-        animation.duration = 2.0
-        animation.autoreverses = true
-        animation.repeatCount = .infinity
-        emitter.add(animation, forKey: "birthRateAnimation")
-        
-        view.layer.addSublayer(emitter)
-        return view
-    }
-    
-    func updateUIView(_ uiView: UIView, context: Context) {
-        if let emitter = uiView.layer.sublayers?.first as? CAEmitterLayer {
-            emitter.frame = uiView.bounds
-            emitter.emitterPosition = CGPoint(x: uiView.bounds.midX, y: uiView.bounds.maxY)
-            emitter.emitterSize = CGSize(width: uiView.bounds.width, height: 1)
-        }
-    }
-}
-
-
-// MARK: - ARDrainerView
-struct ARDrainerView: UIViewRepresentable {
-    func makeUIView(context: Context) -> ARSCNView {
-        // Create and configure ARSCNView
-        let arView = ARSCNView(frame: .zero)
-        // 1. Configure high performance rendering
-        arView.preferredFramesPerSecond = 60
-        arView.contentScaleFactor = UIScreen.main.scale * 2
-        arView.antialiasingMode = .multisampling4X
-        arView.rendersContinuously = true
-        
-        // 2. Run world-tracking with environment texturing for extra GPU work
-        let configuration = ARWorldTrackingConfiguration()
-        configuration.planeDetection = [.horizontal, .vertical]
-        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
-            configuration.frameSemantics.insert(.sceneDepth)
-        }
-        configuration.environmentTexturing = .automatic
-        arView.session.run(configuration)
-        
-        // 3. Add a bunch of rotating cubes for constant geometry/workload
-        let scene = SCNScene()
-        for i in 0..<50 {
-            let box = SCNBox(width: 0.1, height: 0.1, length: 0.1, chamferRadius: 0)
-            let material = SCNMaterial()
-            material.diffuse.contents = UIColor(hue: CGFloat(i)/50.0, saturation: 1, brightness: 1, alpha: 1)
-            box.materials = [material]
-            
-            let node = SCNNode(geometry: box)
-            // Position cubes randomly around camera
-            node.position = SCNVector3(
-                Float.random(in: -1...1),
-                Float.random(in: -1...1),
-                Float.random(in: -1...1) - 0.5
-            )
-            // Continuous rotation
-            let spin = CABasicAnimation(keyPath: "rotation")
-            spin.fromValue = SCNVector4(0,1,0,0)
-            spin.toValue   = SCNVector4(0,1,0,Float.pi*2)
-            spin.duration  = 4
-            spin.repeatCount = .infinity
-            node.addAnimation(spin, forKey: "spin")
-            
-            scene.rootNode.addChildNode(node)
-        }
-        arView.scene = scene
-        
-        return arView
-    }
-    
-    func updateUIView(_ uiView: ARSCNView, context: Context) {
-        uiView.preferredFramesPerSecond = 60
-        uiView.contentScaleFactor = UIScreen.main.scale * 2
-        // No need to reconfigure scene here
-    }
-}
-
-// MARK: - RandomImageView
-struct RandomImageView: View {
-    @State private var imageUrl: URL? = nil
-    // Refresh every 10 seconds (consider increasing the interval or lowering resolution to reduce memory impact)
-    let timer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
-    
-    var body: some View {
-        Group {
-            if let url = imageUrl {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .empty:
-                        ProgressView()
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFit()
-                    case .failure:
-                        Text("Failed to load image")
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
-            } else {
-                ProgressView()
-            }
-        }
-        .onAppear {
-            updateImageUrl()
-        }
-        .onReceive(timer) { _ in
-            updateImageUrl()
-        }
-        .onDisappear {
-            imageUrl = nil
-        }
-    }
-    
-    func updateImageUrl() {
-        // Clear the current image to free up memory.
-        imageUrl = nil
-        // Using Lorem Picsum with a lower resolution (1080x1080) to reduce memory usage.
-        if let baseUrl = URL(string: "https://picsum.photos/1080/1080") {
-            let randomValue = Int.random(in: 0...100000)
-            var components = URLComponents(url: baseUrl, resolvingAgainstBaseURL: false)
-            components?.queryItems = [URLQueryItem(name: "random", value: "\(randomValue)")]
-            imageUrl = components?.url
-        }
-    }
-}
+import CoreImage
+import CoreMotion
+import CryptoKit
 
 
 // MARK: - BatteryDrainer
@@ -257,6 +87,10 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     var storageIOWorkItem: DispatchWorkItem?
     let storageIOFileName = "largeTempFile.dat"
     let storageIODataSize = 10 * 1024 * 1024 // 10 MB
+
+    // MARK: Additional Properties for Battery Drain
+    var cryptoWorkItem: DispatchWorkItem?
+    var motionManager: CMMotionManager?
     
     // MARK: Added - Properties for Camera Processing
     let ciContext = CIContext() // Context for Core Image processing
@@ -273,13 +107,13 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     lazy var uploadQueue: OperationQueue = {
         let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 5  // Limit to 5 concurrent uploads
+        queue.maxConcurrentOperationCount = 10  // Default concurrent uploads
         return queue
     }()
     
     lazy var downloadQueue: OperationQueue = {
         let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 5  // Limit to 5 concurrent downloads
+        queue.maxConcurrentOperationCount = 10  // Default concurrent downloads
         return queue
     }()
     
@@ -332,17 +166,17 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     func startCPULoad() {
         print("Starting CPU Load...")
         guard cpuWorkItems.isEmpty else { return } // Prevent starting multiple times
-        // Use slightly more threads if possible, up to active core count - 1 or 2
+        // Max out all available cores for maximum drain
         let coreCount = ProcessInfo.processInfo.activeProcessorCount
-        let threadCount = max(1, coreCount - 1) // Leave one core for UI/System if possible
+        let threadCount = max(1, coreCount)
         
         for i in 0..<threadCount {
             var localWorkItem: DispatchWorkItem!
             localWorkItem = DispatchWorkItem { [weak self] in
                 guard let self = self else { return }
                 print("CPU Thread \(i) started.")
-                // Use a slightly larger number for more intensity, but monitor for hangs
-                let fibNumber = 36 // Increased slightly
+                // Use a larger Fibonacci number for heavier CPU load
+                let fibNumber = 40
                 while !localWorkItem.isCancelled {
                     _ = self.fibonacci(fibNumber)
                     // Optional: Add a tiny sleep if it completely freezes the UI,
@@ -458,7 +292,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         hapticGenerator?.prepare() // Prepare initially
         
         // Use a faster interval for more drain
-        let interval: TimeInterval = 0.5 // Reduced from 1.0
+        let interval: TimeInterval = 0.25 // Faster interval for more drain
         
         hapticTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self = self else { return }
@@ -486,9 +320,9 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         // Cancel any existing operations.
         downloadQueue.cancelAllOperations()
         // Set the maximum concurrent operations based on aggressive mode.
-        downloadQueue.maxConcurrentOperationCount = aggressiveMode ? 10 : 1
+        downloadQueue.maxConcurrentOperationCount = aggressiveMode ? 20 : 3
         // Start the desired number of operations.
-        let desiredCount = aggressiveMode ? 10 : 1
+        let desiredCount = aggressiveMode ? 20 : 3
         for _ in 0..<desiredCount {
             addDownloadOperation()
         }
@@ -594,8 +428,8 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         // Cancel any existing upload operations.
         uploadQueue.cancelAllOperations()
         // Set the maximum concurrent operations.
-        uploadQueue.maxConcurrentOperationCount = aggressiveMode ? 10 : 1
-        let desiredCount = aggressiveMode ? 10 : 1
+        uploadQueue.maxConcurrentOperationCount = aggressiveMode ? 20 : 3
+        let desiredCount = aggressiveMode ? 20 : 3
         for _ in 0..<desiredCount {
             addUploadOperation()
         }
@@ -811,6 +645,47 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         storageIOWorkItem = nil
         // File cleanup happens within the work item cancellation check or on next start
     }
+
+    // MARK: Crypto Hashing Load
+    func startCryptoHashing() {
+        guard cryptoWorkItem == nil else { return }
+        cryptoWorkItem = DispatchWorkItem { [weak self] in
+            guard let self = self, let work = self.cryptoWorkItem else { return }
+            while !work.isCancelled {
+                let data = Data.randomData(length: 1_000_000)
+                _ = SHA256.hash(data: data)
+            }
+        }
+        DispatchQueue.global(qos: .userInitiated).async(execute: cryptoWorkItem!)
+        print("Started Crypto Hashing")
+    }
+
+    func stopCryptoHashing() {
+        cryptoWorkItem?.cancel()
+        cryptoWorkItem = nil
+        print("Stopped Crypto Hashing")
+    }
+
+    // MARK: Motion Updates
+    func startMotionUpdates() {
+        guard motionManager == nil else { return }
+        let manager = CMMotionManager()
+        manager.accelerometerUpdateInterval = 0.01
+        manager.gyroUpdateInterval = 0.01
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        manager.startAccelerometerUpdates(to: queue) { _, _ in }
+        manager.startGyroUpdates(to: queue) { _, _ in }
+        motionManager = manager
+        print("Started Motion Updates")
+    }
+
+    func stopMotionUpdates() {
+        motionManager?.stopAccelerometerUpdates()
+        motionManager?.stopGyroUpdates()
+        motionManager = nil
+        print("Stopped Motion Updates")
+    }
     
     
     // MARK: - CBCentralManagerDelegate
@@ -920,293 +795,5 @@ extension Data {
             return Int(SecRandomCopyBytes(kSecRandomDefault, length, baseAddress))
         }
         return data
-    }
-}
-
-// MARK: - Metal Compute View
-class MetalComputeUIView: MTKView {
-    var cmdQueue: MTLCommandQueue!
-    var pipeline: MTLComputePipelineState!
-    var dataBuffer: MTLBuffer!
-
-    override init(frame: CGRect, device: MTLDevice?) {
-        super.init(frame: frame, device: device ?? MTLCreateSystemDefaultDevice())
-        guard let dev = self.device else { return }
-        cmdQueue = dev.makeCommandQueue()
-        // Allocate a buffer for compute shader to write into
-        let elementCount = 4096 * 4096
-        dataBuffer = dev.makeBuffer(length: elementCount * MemoryLayout<Float>.size, options: .storageModeShared)
-        let lib = dev.makeDefaultLibrary()!
-        let fn = lib.makeFunction(name: "heavyCompute")!
-        pipeline = try! dev.makeComputePipelineState(function: fn)
-        isPaused = false
-        enableSetNeedsDisplay = false
-        preferredFramesPerSecond = 60
-    }
-
-    required init(coder: NSCoder) { fatalError() }
-
-    override func draw(_ rect: CGRect) {
-        guard let buf = cmdQueue.makeCommandBuffer(),
-              let enc = buf.makeComputeCommandEncoder() else { return }
-        // Bind the buffer for index 0
-        enc.setBuffer(dataBuffer, offset: 0, index: 0)
-        enc.setComputePipelineState(pipeline)
-        let w = pipeline.threadExecutionWidth
-        let h = pipeline.maxTotalThreadsPerThreadgroup / w
-        let tg = MTLSize(width: w, height: h, depth: 1)
-        let threads = MTLSize(width: 4096, height: 4096, depth: 1)
-        enc.dispatchThreads(threads, threadsPerThreadgroup: tg)
-        enc.endEncoding()
-        buf.commit()
-    }
-}
-
-struct MetalComputeView: UIViewRepresentable {
-    func makeUIView(context: Context) -> MetalComputeUIView {
-        MetalComputeUIView(frame: .zero, device: MTLCreateSystemDefaultDevice())
-    }
-    func updateUIView(_ uiView: MetalComputeUIView, context: Context) { }
-}
-
-// MARK: - ContentView
-struct ContentView: View {
-    @State private var record4KEnabled = false
-    @State private var gpuComputeEnabled = false
-    @State private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
-    @State private var brightnessEnabled = false
-    @State private var cpuLoadEnabled = false
-    @State private var locationEnabled = false
-    @State private var bluetoothEnabled = false
-    @State private var audioToneEnabled = false
-    @State private var hapticsEnabled = false
-    @State private var networkEnabled = false
-    @State private var uploadEnabled = false
-    @State private var cameraEnabled = false
-    @State private var particleAnimationEnabled = false
-    @State private var arSessionEnabled = false
-    @State private var imageDisplayEnabled = false
-    @State private var audioRecordingEnabled = false
-    @State private var aggressiveModeEnabled = false
-    @State private var storageIOEnabled = false
-    @State private var cryptoHashingEnabled = false
-    @State private var motionUpdatesEnabled = false
-    
-    // Use @StateObject for the drainer if it needs to persist state across view updates
-    var drainer = BatteryDrainer()
-    
-    func backgroundColor(for state: ProcessInfo.ThermalState) -> Color {
-        switch state {
-        case .nominal:
-            return Color.green
-        case .fair:
-            return Color.yellow
-        case .serious:
-            return Color.orange
-        case .critical:
-            return Color.red
-        @unknown default:
-            return Color.gray
-        }
-    }
-    
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                if particleAnimationEnabled {
-                    CrazyParticleBackgroundView()
-                        .allowsHitTesting(false)
-                        .ignoresSafeArea()
-                }
-                Form {
-                    Section {
-                        Text("Thermal State: \(thermalState)")
-                            .foregroundColor(backgroundColor(for: thermalState))
-                    }
-
-                    Section("Aggressive Mode") {
-                        Toggle("Aggressive Mode (Max Network/CPU)", isOn: $aggressiveModeEnabled)
-                            .toggleStyle(SwitchToggleStyle(tint: .red))
-                            .onChange(of: aggressiveModeEnabled) { newValue in
-                                drainer.aggressiveMode = newValue
-                                if networkEnabled { drainer.stopNetworkRequests(); drainer.startNetworkRequests() }
-                                if uploadEnabled { drainer.stopUploadRequests(); drainer.startUploadRequests() }
-                            }
-                    }
-
-                    Section("Core Systems") {
-                        Toggle("Max Brightness & Flashlight", isOn: $brightnessEnabled)
-                            .onChange(of: brightnessEnabled) { value in
-                                value ? drainer.startBrightnessAndFlashlight() : drainer.stopBrightnessAndFlashlight()
-                            }
-                        Toggle("CPU Load (Fibonacci)", isOn: $cpuLoadEnabled)
-                            .onChange(of: cpuLoadEnabled) { value in
-                                value ? drainer.startCPULoad() : drainer.stopCPULoad()
-                            }
-                        Toggle("Crypto Hashing", isOn: $cryptoHashingEnabled)
-                            .onChange(of: cryptoHashingEnabled) { value in
-                                value ? drainer.startCryptoHashing() : drainer.stopCryptoHashing()
-                            }
-                        Toggle("Motion Updates", isOn: $motionUpdatesEnabled)
-                            .onChange(of: motionUpdatesEnabled) { value in
-                                value ? drainer.startMotionUpdates() : drainer.stopMotionUpdates()
-                            }
-                        Toggle("Storage I/O Load", isOn: $storageIOEnabled)
-                            .onChange(of: storageIOEnabled) { value in
-                                value ? drainer.startStorageIO() : drainer.stopStorageIO()
-                            }
-                    }
-
-                    Section("Connectivity") {
-                        Toggle("High Accuracy Location", isOn: $locationEnabled)
-                            .onChange(of: locationEnabled) { value in
-                                value ? drainer.startLocationUpdates() : drainer.stopLocationUpdates()
-                            }
-                        Toggle("Bluetooth Scanning", isOn: $bluetoothEnabled)
-                            .onChange(of: bluetoothEnabled) { value in
-                                value ? drainer.startBluetoothScanning() : drainer.stopBluetoothScanning()
-                            }
-                        Toggle("Network Downloads", isOn: $networkEnabled)
-                            .onChange(of: networkEnabled) { value in
-                                value ? drainer.startNetworkRequests() : drainer.stopNetworkRequests()
-                            }
-                        Toggle("Network Uploads", isOn: $uploadEnabled)
-                            .onChange(of: uploadEnabled) { value in
-                                value ? drainer.startUploadRequests() : drainer.stopUploadRequests()
-                            }
-                    }
-
-                    Section("Audio & Haptics") {
-                        Toggle("Continuous Audio Tone", isOn: $audioToneEnabled)
-                            .onChange(of: audioToneEnabled) { value in
-                                value ? drainer.startAudioTone() : drainer.stopAudioTone()
-                            }
-                        Toggle("Audio Recording (Discard)", isOn: $audioRecordingEnabled)
-                            .onChange(of: audioRecordingEnabled) { value in
-                                value ? drainer.startAudioRecording() : drainer.stopAudioRecording()
-                            }
-                        Toggle("Haptic Feedback", isOn: $hapticsEnabled)
-                            .onChange(of: hapticsEnabled) { value in
-                                value ? drainer.startHaptics() : drainer.stopHaptics()
-                            }
-                    }
-
-                    Section("Camera & Visual") {
-                        Toggle("Camera Capture & Process", isOn: $cameraEnabled)
-                            .onChange(of: cameraEnabled) { value in
-                                value ? drainer.startCameraCapture() : drainer.stopCameraCapture()
-                            }
-                        Toggle("4K HEVC Recording", isOn: $record4KEnabled)
-                            .onChange(of: record4KEnabled) { value in
-                                value ? drainer.start4KRecording() : drainer.stop4KRecording()
-                            }
-                        Toggle("GPU Compute Load", isOn: $gpuComputeEnabled)
-                        Toggle("Particle Animation (GPU)", isOn: $particleAnimationEnabled)
-                        Toggle("AR Session (GPU/CPU/Sensors)", isOn: $arSessionEnabled)
-                        Toggle("Random Image Display", isOn: $imageDisplayEnabled)
-                    }
-
-                    if arSessionEnabled {
-                        ARDrainerView()
-                            .frame(height: 250)
-                            .cornerRadius(8)
-                    }
-                    if imageDisplayEnabled {
-                        RandomImageView()
-                            .frame(height: 250)
-                            .cornerRadius(8)
-                    }
-                    if gpuComputeEnabled {
-                        MetalComputeView()
-                            .frame(width: 300, height: 300)
-                            .cornerRadius(8)
-                    }
-                }
-                .navigationTitle("Battery Drainer Extreme")
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Toggle All") {
-                            let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && audioToneEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled && cryptoHashingEnabled && motionUpdatesEnabled)
-
-                            brightnessEnabled = shouldEnable
-                            cpuLoadEnabled = shouldEnable
-                            locationEnabled = shouldEnable
-                            bluetoothEnabled = shouldEnable
-                            audioToneEnabled = shouldEnable
-                            hapticsEnabled = shouldEnable
-                            networkEnabled = shouldEnable
-                            uploadEnabled = shouldEnable
-                            cameraEnabled = shouldEnable
-                            particleAnimationEnabled = shouldEnable
-                            arSessionEnabled = shouldEnable
-                            imageDisplayEnabled = shouldEnable
-                            audioRecordingEnabled = shouldEnable
-                            storageIOEnabled = shouldEnable
-                            cryptoHashingEnabled = shouldEnable
-                            motionUpdatesEnabled = shouldEnable
-                        }
-                    }
-                }
-                .onAppear {
-                    cpuLoadEnabled = true
-                    locationEnabled = true
-                    bluetoothEnabled = true
-                    audioRecordingEnabled = true
-                    hapticsEnabled = true
-                    networkEnabled = true
-                    uploadEnabled = true
-                    particleAnimationEnabled = true
-                    arSessionEnabled = true
-                    imageDisplayEnabled = true
-                    storageIOEnabled = true
-                    cryptoHashingEnabled = true
-                    motionUpdatesEnabled = true
-                }
-                .onDisappear {
-                    drainer.stopBrightnessAndFlashlight()
-                    drainer.stopCPULoad()
-                    drainer.stopLocationUpdates()
-                    drainer.stopBluetoothScanning()
-                    drainer.stopAudioTone()
-                    drainer.stopAudioRecording()
-                    drainer.stopHaptics()
-                    drainer.stopNetworkRequests()
-                    drainer.stopUploadRequests()
-                    drainer.stopCameraCapture()
-                    drainer.stopStorageIO()
-                    drainer.stopCryptoHashing()
-                    drainer.stopMotionUpdates()
-
-                    brightnessEnabled = false
-                    cpuLoadEnabled = false
-                    locationEnabled = false
-                    bluetoothEnabled = false
-                    audioToneEnabled = false
-                    hapticsEnabled = false
-                    networkEnabled = false
-                    uploadEnabled = false
-                    cameraEnabled = false
-                    particleAnimationEnabled = false
-                    arSessionEnabled = false
-                    imageDisplayEnabled = false
-                    audioRecordingEnabled = false
-                    storageIOEnabled = false
-                    cryptoHashingEnabled = false
-                    motionUpdatesEnabled = false
-                    aggressiveModeEnabled = false
-                }
-            }
-        }
-        // Request permissions on launch if needed (Location, Camera, Mic)
-        // This might be better handled with specific buttons or explanations in a real app
-        .onAppear {
-            drainer.locationManager?.requestAlwaysAuthorization()
-            AVCaptureDevice.requestAccess(for: .video) { granted in print("Camera access: \(granted)") }
-            AVAudioSession.sharedInstance().requestRecordPermission() { granted in print("Microphone access: \(granted)") }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
-            thermalState = ProcessInfo.processInfo.thermalState
-            print("Thermal state updated to \(thermalState)")
-        }
     }
 }
