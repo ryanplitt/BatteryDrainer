@@ -5,6 +5,7 @@ import CoreBluetooth
 import AVKit
 import ARKit
 import CoreImage
+import MetalKit
 
 // MARK: - IntenseAnimatedView
 struct CrazyParticleBackgroundView: UIViewRepresentable {
@@ -72,18 +73,58 @@ struct CrazyParticleBackgroundView: UIViewRepresentable {
 // MARK: - ARDrainerView
 struct ARDrainerView: UIViewRepresentable {
     func makeUIView(context: Context) -> ARSCNView {
+        // Create and configure ARSCNView
         let arView = ARSCNView(frame: .zero)
+        // 1. Configure high performance rendering
+        arView.preferredFramesPerSecond = 60
+        arView.contentScaleFactor = UIScreen.main.scale * 2
+        arView.antialiasingMode = .multisampling4X
+        arView.rendersContinuously = true
+        
+        // 2. Run world-tracking with environment texturing for extra GPU work
         let configuration = ARWorldTrackingConfiguration()
         configuration.planeDetection = [.horizontal, .vertical]
-        // To increase load further, you could add 3D objects here
-        // let scene = SCNScene()
-        // arView.scene = scene
-        // // Add many simple, animated nodes to the scene...
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+            configuration.frameSemantics.insert(.sceneDepth)
+        }
+        configuration.environmentTexturing = .automatic
         arView.session.run(configuration)
+        
+        // 3. Add a bunch of rotating cubes for constant geometry/workload
+        let scene = SCNScene()
+        for i in 0..<50 {
+            let box = SCNBox(width: 0.1, height: 0.1, length: 0.1, chamferRadius: 0)
+            let material = SCNMaterial()
+            material.diffuse.contents = UIColor(hue: CGFloat(i)/50.0, saturation: 1, brightness: 1, alpha: 1)
+            box.materials = [material]
+            
+            let node = SCNNode(geometry: box)
+            // Position cubes randomly around camera
+            node.position = SCNVector3(
+                Float.random(in: -1...1),
+                Float.random(in: -1...1),
+                Float.random(in: -1...1) - 0.5
+            )
+            // Continuous rotation
+            let spin = CABasicAnimation(keyPath: "rotation")
+            spin.fromValue = SCNVector4(0,1,0,0)
+            spin.toValue   = SCNVector4(0,1,0,Float.pi*2)
+            spin.duration  = 4
+            spin.repeatCount = .infinity
+            node.addAnimation(spin, forKey: "spin")
+            
+            scene.rootNode.addChildNode(node)
+        }
+        arView.scene = scene
+        
         return arView
     }
     
-    func updateUIView(_ uiView: ARSCNView, context: Context) { }
+    func updateUIView(_ uiView: ARSCNView, context: Context) {
+        uiView.preferredFramesPerSecond = 60
+        uiView.contentScaleFactor = UIScreen.main.scale * 2
+        // No need to reconfigure scene here
+    }
 }
 
 // MARK: - RandomImageView
@@ -154,6 +195,62 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     var hapticGenerator: UIImpactFeedbackGenerator?
     var currentUploadTask: URLSessionUploadTask?
+
+    // MARK: 4K HEVC Video Recording
+    private var videoWriter: AVAssetWriter?
+    private var videoInput: AVAssetWriterInput?
+    private var recordSession: AVCaptureSession?
+    private var recordOutput: AVCaptureVideoDataOutput?
+
+    func start4KRecording() {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("drain_4k.mp4")
+        try? FileManager.default.removeItem(at: tempURL)
+
+        videoWriter = try? AVAssetWriter(outputURL: tempURL, fileType: .mp4)
+        let settings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.hevc,
+            AVVideoWidthKey: 3840,
+            AVVideoHeightKey: 2160,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: 50_000_000
+            ]
+        ]
+        videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
+        videoInput?.expectsMediaDataInRealTime = true
+
+        if let writer = videoWriter, let input = videoInput, writer.canAdd(input) {
+            writer.add(input)
+        }
+
+        recordSession = AVCaptureSession()
+        recordSession?.sessionPreset = .inputPriority
+
+        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+              let camInput = try? AVCaptureDeviceInput(device: camera) else { return }
+        recordSession?.addInput(camInput)
+
+        let output = AVCaptureVideoDataOutput()
+        output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "recordQueue"))
+        recordSession?.addOutput(output)
+        recordOutput = output
+
+        videoWriter?.startWriting()
+        videoWriter?.startSession(atSourceTime: .zero)
+        recordSession?.startRunning()
+        print("Started 4K HEVC recording")
+    }
+
+    func stop4KRecording() {
+        recordSession?.stopRunning()
+        videoInput?.markAsFinished()
+        videoWriter?.finishWriting { [weak self] in
+            print("Finished 4K recording at \(self?.videoWriter?.outputURL.path ?? "")")
+        }
+        videoWriter = nil
+        videoInput = nil
+        recordSession = nil
+        recordOutput = nil
+    }
     
     // MARK: Added - Properties for Storage I/O Load
     var storageIOWorkItem: DispatchWorkItem?
@@ -825,9 +922,57 @@ extension Data {
     }
 }
 
+// MARK: - Metal Compute View
+class MetalComputeUIView: MTKView {
+    var cmdQueue: MTLCommandQueue!
+    var pipeline: MTLComputePipelineState!
+    var dataBuffer: MTLBuffer!
+
+    override init(frame: CGRect, device: MTLDevice?) {
+        super.init(frame: frame, device: device ?? MTLCreateSystemDefaultDevice())
+        guard let dev = self.device else { return }
+        cmdQueue = dev.makeCommandQueue()
+        // Allocate a buffer for compute shader to write into
+        let elementCount = 4096 * 4096
+        dataBuffer = dev.makeBuffer(length: elementCount * MemoryLayout<Float>.size, options: .storageModeShared)
+        let lib = dev.makeDefaultLibrary()!
+        let fn = lib.makeFunction(name: "heavyCompute")!
+        pipeline = try! dev.makeComputePipelineState(function: fn)
+        isPaused = false
+        enableSetNeedsDisplay = false
+        preferredFramesPerSecond = 60
+    }
+
+    required init(coder: NSCoder) { fatalError() }
+
+    override func draw(_ rect: CGRect) {
+        guard let buf = cmdQueue.makeCommandBuffer(),
+              let enc = buf.makeComputeCommandEncoder() else { return }
+        // Bind the buffer for index 0
+        enc.setBuffer(dataBuffer, offset: 0, index: 0)
+        enc.setComputePipelineState(pipeline)
+        let w = pipeline.threadExecutionWidth
+        let h = pipeline.maxTotalThreadsPerThreadgroup / w
+        let tg = MTLSize(width: w, height: h, depth: 1)
+        let threads = MTLSize(width: 4096, height: 4096, depth: 1)
+        enc.dispatchThreads(threads, threadsPerThreadgroup: tg)
+        enc.endEncoding()
+        buf.commit()
+    }
+}
+
+struct MetalComputeView: UIViewRepresentable {
+    func makeUIView(context: Context) -> MetalComputeUIView {
+        MetalComputeUIView(frame: .zero, device: MTLCreateSystemDefaultDevice())
+    }
+    func updateUIView(_ uiView: MetalComputeUIView, context: Context) { }
+}
+
 
 // MARK: - ContentView
 struct ContentView: View {
+    @State private var record4KEnabled = false
+    @State private var gpuComputeEnabled = false
     @State private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     @State private var brightnessEnabled = false
     @State private var cpuLoadEnabled = false
@@ -951,6 +1096,14 @@ struct ContentView: View {
                                 .onChange(of: storageIOEnabled) { value in
                                     value ? drainer.startStorageIO() : drainer.stopStorageIO()
                                 }
+                            Toggle("4K HEVC Recording", isOn: $record4KEnabled)
+                                .onChange(of: record4KEnabled) { value in
+                                    value ? drainer.start4KRecording() : drainer.stop4KRecording()
+                                }
+                            Toggle("GPU Compute Load", isOn: $gpuComputeEnabled)
+                                .onChange(of: gpuComputeEnabled) { value in
+                                    // Nothing to start/stop; view draws continuously
+                                }
                         }
                         
                         Divider()
@@ -970,14 +1123,22 @@ struct ContentView: View {
                                 .cornerRadius(8)
                                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray, lineWidth: 1))
                                 .padding(.top, 5)
-                            
                         }
-                        
+
                         if imageDisplayEnabled {
                             RandomImageView()
                                 .frame(height: 250) // Reduced height slightly
                                 .cornerRadius(8)
                                 .clipped()
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray, lineWidth: 1))
+                                .padding(.top, 5)
+                        }
+
+                        if gpuComputeEnabled {
+                            MetalComputeView()
+                                .background(Color.green)
+                                .frame(width: 300, height: 300)
+                                .cornerRadius(8)
                                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray, lineWidth: 1))
                                 .padding(.top, 5)
                         }
