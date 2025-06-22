@@ -100,8 +100,8 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         let config = URLSessionConfiguration.default
         // Increase the number of allowed concurrent connections.
         config.httpMaximumConnectionsPerHost = 50 // Keep this high for aggressive mode
-        config.timeoutIntervalForRequest = 40 // Shorter timeout for aggressive mode
-        config.timeoutIntervalForResource = 40
+        config.timeoutIntervalForRequest = 10 // Shorter timeout to keep requests cycling
+        config.timeoutIntervalForResource = 10
         return URLSession(configuration: config)
     }()
     
@@ -326,6 +326,17 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         for _ in 0..<desiredCount {
             addDownloadOperation()
         }
+        // Ensure operations keep running even if the queue empties.
+        networkTimer?.invalidate()
+        networkTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            if self.downloadQueue.operationCount == 0 {
+                for _ in 0..<desiredCount {
+                    self.addDownloadOperation()
+                }
+                print("Network queue was empty. Restarted operations.")
+            }
+        }
         print("Started continuous queued Download Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
     }
 
@@ -347,6 +358,8 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     }
 
     func stopNetworkRequests() {
+        networkTimer?.invalidate()
+        networkTimer = nil
         downloadQueue.cancelAllOperations()
         print("Stopped continuous Download Requests")
     }
@@ -433,7 +446,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         for _ in 0..<desiredCount {
             addUploadOperation()
         }
-        print("Started continuous queued Upload Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
+        print("Started continuous queued Upload Requests (Mode: \\(aggressiveMode ? "Aggressive" : "Normal"))")
     }
 
     private func addUploadOperation() {
