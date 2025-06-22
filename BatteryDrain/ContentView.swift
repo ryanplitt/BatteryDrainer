@@ -6,6 +6,7 @@ import AVKit
 import ARKit
 import CoreImage
 import MetalKit
+import Security
 
 // MARK: - IntenseAnimatedView
 struct CrazyParticleBackgroundView: UIViewRepresentable {
