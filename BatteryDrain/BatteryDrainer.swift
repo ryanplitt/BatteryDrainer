@@ -6,6 +6,8 @@ import CoreBluetooth
 import UIKit
 import Security
 import CoreImage
+import CoreMotion
+import CryptoKit
 
 
 // MARK: - BatteryDrainer
@@ -85,6 +87,10 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     var storageIOWorkItem: DispatchWorkItem?
     let storageIOFileName = "largeTempFile.dat"
     let storageIODataSize = 10 * 1024 * 1024 // 10 MB
+
+    // MARK: Additional Properties for Battery Drain
+    var cryptoWorkItem: DispatchWorkItem?
+    var motionManager: CMMotionManager?
     
     // MARK: Added - Properties for Camera Processing
     let ciContext = CIContext() // Context for Core Image processing
@@ -101,13 +107,13 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     lazy var uploadQueue: OperationQueue = {
         let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 5  // Limit to 5 concurrent uploads
+        queue.maxConcurrentOperationCount = 10  // Default concurrent uploads
         return queue
     }()
     
     lazy var downloadQueue: OperationQueue = {
         let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 5  // Limit to 5 concurrent downloads
+        queue.maxConcurrentOperationCount = 10  // Default concurrent downloads
         return queue
     }()
     
@@ -160,17 +166,17 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     func startCPULoad() {
         print("Starting CPU Load...")
         guard cpuWorkItems.isEmpty else { return } // Prevent starting multiple times
-        // Use slightly more threads if possible, up to active core count - 1 or 2
+        // Max out all available cores for maximum drain
         let coreCount = ProcessInfo.processInfo.activeProcessorCount
-        let threadCount = max(1, coreCount - 1) // Leave one core for UI/System if possible
+        let threadCount = max(1, coreCount)
         
         for i in 0..<threadCount {
             var localWorkItem: DispatchWorkItem!
             localWorkItem = DispatchWorkItem { [weak self] in
                 guard let self = self else { return }
                 print("CPU Thread \(i) started.")
-                // Use a slightly larger number for more intensity, but monitor for hangs
-                let fibNumber = 36 // Increased slightly
+                // Use a larger Fibonacci number for heavier CPU load
+                let fibNumber = 40
                 while !localWorkItem.isCancelled {
                     _ = self.fibonacci(fibNumber)
                     // Optional: Add a tiny sleep if it completely freezes the UI,
@@ -286,7 +292,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         hapticGenerator?.prepare() // Prepare initially
         
         // Use a faster interval for more drain
-        let interval: TimeInterval = 0.5 // Reduced from 1.0
+        let interval: TimeInterval = 0.25 // Faster interval for more drain
         
         hapticTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self = self else { return }
@@ -314,9 +320,9 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         // Cancel any existing operations.
         downloadQueue.cancelAllOperations()
         // Set the maximum concurrent operations based on aggressive mode.
-        downloadQueue.maxConcurrentOperationCount = aggressiveMode ? 10 : 1
+        downloadQueue.maxConcurrentOperationCount = aggressiveMode ? 20 : 3
         // Start the desired number of operations.
-        let desiredCount = aggressiveMode ? 10 : 1
+        let desiredCount = aggressiveMode ? 20 : 3
         for _ in 0..<desiredCount {
             addDownloadOperation()
         }
@@ -422,8 +428,8 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         // Cancel any existing upload operations.
         uploadQueue.cancelAllOperations()
         // Set the maximum concurrent operations.
-        uploadQueue.maxConcurrentOperationCount = aggressiveMode ? 10 : 1
-        let desiredCount = aggressiveMode ? 10 : 1
+        uploadQueue.maxConcurrentOperationCount = aggressiveMode ? 20 : 3
+        let desiredCount = aggressiveMode ? 20 : 3
         for _ in 0..<desiredCount {
             addUploadOperation()
         }
@@ -638,6 +644,47 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         storageIOWorkItem?.cancel()
         storageIOWorkItem = nil
         // File cleanup happens within the work item cancellation check or on next start
+    }
+
+    // MARK: Crypto Hashing Load
+    func startCryptoHashing() {
+        guard cryptoWorkItem == nil else { return }
+        cryptoWorkItem = DispatchWorkItem { [weak self] in
+            guard let self = self, let work = self.cryptoWorkItem else { return }
+            while !work.isCancelled {
+                let data = Data.randomData(length: 1_000_000)
+                _ = SHA256.hash(data: data)
+            }
+        }
+        DispatchQueue.global(qos: .userInitiated).async(execute: cryptoWorkItem!)
+        print("Started Crypto Hashing")
+    }
+
+    func stopCryptoHashing() {
+        cryptoWorkItem?.cancel()
+        cryptoWorkItem = nil
+        print("Stopped Crypto Hashing")
+    }
+
+    // MARK: Motion Updates
+    func startMotionUpdates() {
+        guard motionManager == nil else { return }
+        let manager = CMMotionManager()
+        manager.accelerometerUpdateInterval = 0.01
+        manager.gyroUpdateInterval = 0.01
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        manager.startAccelerometerUpdates(to: queue) { _, _ in }
+        manager.startGyroUpdates(to: queue) { _, _ in }
+        motionManager = manager
+        print("Started Motion Updates")
+    }
+
+    func stopMotionUpdates() {
+        motionManager?.stopAccelerometerUpdates()
+        motionManager?.stopGyroUpdates()
+        motionManager = nil
+        print("Stopped Motion Updates")
     }
     
     

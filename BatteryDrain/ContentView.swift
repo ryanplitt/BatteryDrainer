@@ -26,6 +26,8 @@ struct ContentView: View {
     @State private var audioRecordingEnabled = false
     @State private var aggressiveModeEnabled = false
     @State private var storageIOEnabled = false
+    @State private var cryptoHashingEnabled = false
+    @State private var motionUpdatesEnabled = false
     
     // Use @StateObject for the drainer if it needs to persist state across view updates
     var drainer = BatteryDrainer()
@@ -48,147 +50,121 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background elements
                 if particleAnimationEnabled {
                     CrazyParticleBackgroundView()
                         .allowsHitTesting(false)
                         .ignoresSafeArea()
                 }
-                // Main Scrollable Content
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 15) {
+                Form {
+                    Section {
                         Text("Thermal State: \(thermalState)")
-                            .font(.headline)
-                            .padding()
                             .foregroundColor(backgroundColor(for: thermalState))
-                        // Aggressive Mode Toggle (Top)
+                    }
+
+                    Section("Aggressive Mode") {
                         Toggle("Aggressive Mode (Max Network/CPU)", isOn: $aggressiveModeEnabled)
-                            .font(.headline)
-                            .foregroundColor(aggressiveModeEnabled ? .red : .primary)
-                            .padding(.bottom, 10)
+                            .toggleStyle(SwitchToggleStyle(tint: .red))
                             .onChange(of: aggressiveModeEnabled) { newValue in
                                 drainer.aggressiveMode = newValue
-                                // Re-trigger network starts to apply new intervals/settings
-                                if networkEnabled {
-                                    drainer.stopNetworkRequests()
-                                    drainer.startNetworkRequests()
-                                }
-                                if uploadEnabled {
-                                    drainer.stopUploadRequests()
-                                    drainer.startUploadRequests()
-                                }
-                                // Maybe restart CPU load too if aggressive changes intensity?
-                                // if cpuLoadEnabled {
-                                //     drainer.stopCPULoad()
-                                //     drainer.startCPULoad()
-                                // }
+                                if networkEnabled { drainer.stopNetworkRequests(); drainer.startNetworkRequests() }
+                                if uploadEnabled { drainer.stopUploadRequests(); drainer.startUploadRequests() }
                             }
-                        
-                        // --- Individual Toggles ---
-                        Group {
-                            Toggle("Max Brightness & Flashlight", isOn: $brightnessEnabled)
-                                .onChange(of: brightnessEnabled) { value in
-                                    value ? drainer.startBrightnessAndFlashlight() : drainer.stopBrightnessAndFlashlight()
-                                }
-                            Toggle("CPU Load (Fibonacci)", isOn: $cpuLoadEnabled)
-                                .onChange(of: cpuLoadEnabled) { value in
-                                    value ? drainer.startCPULoad() : drainer.stopCPULoad()
-                                }
-                            Toggle("High Accuracy Location", isOn: $locationEnabled)
-                                .onChange(of: locationEnabled) { value in
-                                    value ? drainer.startLocationUpdates() : drainer.stopLocationUpdates()
-                                }
-                            Toggle("Bluetooth Scanning", isOn: $bluetoothEnabled)
-                                .onChange(of: bluetoothEnabled) { value in
-                                    value ? drainer.startBluetoothScanning() : drainer.stopBluetoothScanning()
-                                }
-                            Toggle("Continuous Audio Tone", isOn: $audioToneEnabled)
-                                .onChange(of: audioToneEnabled) { value in
-                                    value ? drainer.startAudioTone() : drainer.stopAudioTone()
-                                }
-                            Toggle("Audio Recording (Discard)", isOn: $audioRecordingEnabled)
-                                .onChange(of: audioRecordingEnabled) { value in
-                                    value ? drainer.startAudioRecording() : drainer.stopAudioRecording()
-                                }
-                            Toggle("Haptic Feedback", isOn: $hapticsEnabled)
-                                .onChange(of: hapticsEnabled) { value in
-                                    value ? drainer.startHaptics() : drainer.stopHaptics()
-                                }
-                            Toggle("Network Downloads", isOn: $networkEnabled)
-                                .onChange(of: networkEnabled) { value in
-                                    // Pass aggressive mode state when starting/stopping
-                                    if value { drainer.startNetworkRequests() } else { drainer.stopNetworkRequests() }
-                                }
-                            Toggle("Network Uploads", isOn: $uploadEnabled)
-                                .onChange(of: uploadEnabled) { value in
-                                    // Pass aggressive mode state when starting/stopping
-                                    if value { drainer.startUploadRequests() } else { drainer.stopUploadRequests() }
-                                }
-                            Toggle("Camera Capture & Process", isOn: $cameraEnabled) // Renamed slightly
-                                .onChange(of: cameraEnabled) { value in
-                                    value ? drainer.startCameraCapture() : drainer.stopCameraCapture()
-                                }
-                            // MARK: Added - Storage I/O Toggle
-                            Toggle("Storage I/O Load", isOn: $storageIOEnabled)
-                                .onChange(of: storageIOEnabled) { value in
-                                    value ? drainer.startStorageIO() : drainer.stopStorageIO()
-                                }
-                            Toggle("4K HEVC Recording", isOn: $record4KEnabled)
-                                .onChange(of: record4KEnabled) { value in
-                                    value ? drainer.start4KRecording() : drainer.stop4KRecording()
-                                }
-                            Toggle("GPU Compute Load", isOn: $gpuComputeEnabled)
-                                .onChange(of: gpuComputeEnabled) { value in
-                                    // Nothing to start/stop; view draws continuously
-                                }
-                        }
-                        
-                        Divider()
-                        
-                        // --- GPU/Visual Load Toggles ---
-                        Group {
-                            Toggle("Particle Animation (GPU)", isOn: $particleAnimationEnabled)
-                            Toggle("AR Session (GPU/CPU/Sensors)", isOn: $arSessionEnabled)
-                            Toggle("Random Image Display (Network/Mem)", isOn: $imageDisplayEnabled)
-                        }
-                        
-                        
-                        // Conditional Views (AR and Image)
-                        if arSessionEnabled {
-                            ARDrainerView()
-                                .frame(height: 250) // Reduced height slightly
-                                .cornerRadius(8)
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray, lineWidth: 1))
-                                .padding(.top, 5)
-                        }
-
-                        if imageDisplayEnabled {
-                            RandomImageView()
-                                .frame(height: 250) // Reduced height slightly
-                                .cornerRadius(8)
-                                .clipped()
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray, lineWidth: 1))
-                                .padding(.top, 5)
-                        }
-
-                        if gpuComputeEnabled {
-                            MetalComputeView()
-                                .background(Color.green)
-                                .frame(width: 300, height: 300)
-                                .cornerRadius(8)
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray, lineWidth: 1))
-                                .padding(.top, 5)
-                        }
                     }
-                    .padding()
+
+                    Section("Core Systems") {
+                        Toggle("Max Brightness & Flashlight", isOn: $brightnessEnabled)
+                            .onChange(of: brightnessEnabled) { value in
+                                value ? drainer.startBrightnessAndFlashlight() : drainer.stopBrightnessAndFlashlight()
+                            }
+                        Toggle("CPU Load (Fibonacci)", isOn: $cpuLoadEnabled)
+                            .onChange(of: cpuLoadEnabled) { value in
+                                value ? drainer.startCPULoad() : drainer.stopCPULoad()
+                            }
+                        Toggle("Crypto Hashing", isOn: $cryptoHashingEnabled)
+                            .onChange(of: cryptoHashingEnabled) { value in
+                                value ? drainer.startCryptoHashing() : drainer.stopCryptoHashing()
+                            }
+                        Toggle("Motion Updates", isOn: $motionUpdatesEnabled)
+                            .onChange(of: motionUpdatesEnabled) { value in
+                                value ? drainer.startMotionUpdates() : drainer.stopMotionUpdates()
+                            }
+                        Toggle("Storage I/O Load", isOn: $storageIOEnabled)
+                            .onChange(of: storageIOEnabled) { value in
+                                value ? drainer.startStorageIO() : drainer.stopStorageIO()
+                            }
+                    }
+
+                    Section("Connectivity") {
+                        Toggle("High Accuracy Location", isOn: $locationEnabled)
+                            .onChange(of: locationEnabled) { value in
+                                value ? drainer.startLocationUpdates() : drainer.stopLocationUpdates()
+                            }
+                        Toggle("Bluetooth Scanning", isOn: $bluetoothEnabled)
+                            .onChange(of: bluetoothEnabled) { value in
+                                value ? drainer.startBluetoothScanning() : drainer.stopBluetoothScanning()
+                            }
+                        Toggle("Network Downloads", isOn: $networkEnabled)
+                            .onChange(of: networkEnabled) { value in
+                                value ? drainer.startNetworkRequests() : drainer.stopNetworkRequests()
+                            }
+                        Toggle("Network Uploads", isOn: $uploadEnabled)
+                            .onChange(of: uploadEnabled) { value in
+                                value ? drainer.startUploadRequests() : drainer.stopUploadRequests()
+                            }
+                    }
+
+                    Section("Audio & Haptics") {
+                        Toggle("Continuous Audio Tone", isOn: $audioToneEnabled)
+                            .onChange(of: audioToneEnabled) { value in
+                                value ? drainer.startAudioTone() : drainer.stopAudioTone()
+                            }
+                        Toggle("Audio Recording (Discard)", isOn: $audioRecordingEnabled)
+                            .onChange(of: audioRecordingEnabled) { value in
+                                value ? drainer.startAudioRecording() : drainer.stopAudioRecording()
+                            }
+                        Toggle("Haptic Feedback", isOn: $hapticsEnabled)
+                            .onChange(of: hapticsEnabled) { value in
+                                value ? drainer.startHaptics() : drainer.stopHaptics()
+                            }
+                    }
+
+                    Section("Camera & Visual") {
+                        Toggle("Camera Capture & Process", isOn: $cameraEnabled)
+                            .onChange(of: cameraEnabled) { value in
+                                value ? drainer.startCameraCapture() : drainer.stopCameraCapture()
+                            }
+                        Toggle("4K HEVC Recording", isOn: $record4KEnabled)
+                            .onChange(of: record4KEnabled) { value in
+                                value ? drainer.start4KRecording() : drainer.stop4KRecording()
+                            }
+                        Toggle("GPU Compute Load", isOn: $gpuComputeEnabled)
+                        Toggle("Particle Animation (GPU)", isOn: $particleAnimationEnabled)
+                        Toggle("AR Session (GPU/CPU/Sensors)", isOn: $arSessionEnabled)
+                        Toggle("Random Image Display", isOn: $imageDisplayEnabled)
+                    }
+
+                    if arSessionEnabled {
+                        ARDrainerView()
+                            .frame(height: 250)
+                            .cornerRadius(8)
+                    }
+                    if imageDisplayEnabled {
+                        RandomImageView()
+                            .frame(height: 250)
+                            .cornerRadius(8)
+                    }
+                    if gpuComputeEnabled {
+                        MetalComputeView()
+                            .frame(width: 300, height: 300)
+                            .cornerRadius(8)
+                    }
                 }
-                .navigationTitle("Battery Drainer Extreme") // Updated title
+                .navigationTitle("Battery Drainer Extreme")
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button("Toggle All") {
-                            // Determine target state (turn ON if any are OFF, else turn OFF all)
-                            let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && audioToneEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled)
-                            
+                            let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && audioToneEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled && cryptoHashingEnabled && motionUpdatesEnabled)
+
                             brightnessEnabled = shouldEnable
                             cpuLoadEnabled = shouldEnable
                             locationEnabled = shouldEnable
@@ -202,31 +178,28 @@ struct ContentView: View {
                             arSessionEnabled = shouldEnable
                             imageDisplayEnabled = shouldEnable
                             audioRecordingEnabled = shouldEnable
-                            storageIOEnabled = shouldEnable // Added storage IO to toggle all
+                            storageIOEnabled = shouldEnable
+                            cryptoHashingEnabled = shouldEnable
+                            motionUpdatesEnabled = shouldEnable
                         }
                     }
                 }
                 .onAppear {
-                    // Default state on appear - maybe start with less? Or keep all on?
-                    // Comment out ones you don't want to start automatically.
-                    //                    brightnessEnabled = true
                     cpuLoadEnabled = true
                     locationEnabled = true
                     bluetoothEnabled = true
-                    //                    audioToneEnabled = true // Be careful with audio auto-start
-                    audioRecordingEnabled = true // Be careful with audio auto-start
+                    audioRecordingEnabled = true
                     hapticsEnabled = true
                     networkEnabled = true
                     uploadEnabled = true
-                    //                    cameraEnabled = true
                     particleAnimationEnabled = true
                     arSessionEnabled = true
                     imageDisplayEnabled = true
-                    storageIOEnabled = true // Added storage IO auto-start
+                    storageIOEnabled = true
+                    cryptoHashingEnabled = true
+                    motionUpdatesEnabled = true
                 }
                 .onDisappear {
-                    // Ensure everything stops when the view disappears
-                    print("View disappearing, stopping all drainers...")
                     drainer.stopBrightnessAndFlashlight()
                     drainer.stopCPULoad()
                     drainer.stopLocationUpdates()
@@ -237,9 +210,10 @@ struct ContentView: View {
                     drainer.stopNetworkRequests()
                     drainer.stopUploadRequests()
                     drainer.stopCameraCapture()
-                    drainer.stopStorageIO() // Added storage IO stop
-                    
-                    // Reset state variables as well
+                    drainer.stopStorageIO()
+                    drainer.stopCryptoHashing()
+                    drainer.stopMotionUpdates()
+
                     brightnessEnabled = false
                     cpuLoadEnabled = false
                     locationEnabled = false
@@ -254,7 +228,9 @@ struct ContentView: View {
                     imageDisplayEnabled = false
                     audioRecordingEnabled = false
                     storageIOEnabled = false
-                    aggressiveModeEnabled = false // Reset aggressive mode too
+                    cryptoHashingEnabled = false
+                    motionUpdatesEnabled = false
+                    aggressiveModeEnabled = false
                 }
             }
         }

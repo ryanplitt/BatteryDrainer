@@ -8,7 +8,7 @@ struct ARDrainerView: UIViewRepresentable {
         // Create and configure ARSCNView
         let arView = ARSCNView(frame: .zero)
         // 1. Configure high performance rendering
-        arView.preferredFramesPerSecond = 60
+        arView.preferredFramesPerSecond = 120
         arView.contentScaleFactor = UIScreen.main.scale * 2
         arView.antialiasingMode = .multisampling4X
         arView.rendersContinuously = true
@@ -24,7 +24,7 @@ struct ARDrainerView: UIViewRepresentable {
         
         // 3. Add a bunch of rotating cubes for constant geometry/workload
         let scene = SCNScene()
-        for i in 0..<50 {
+        for i in 0..<100 {
             let box = SCNBox(width: 0.1, height: 0.1, length: 0.1, chamferRadius: 0)
             let material = SCNMaterial()
             material.diffuse.contents = UIColor(hue: CGFloat(i)/50.0, saturation: 1, brightness: 1, alpha: 1)
@@ -53,7 +53,7 @@ struct ARDrainerView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: ARSCNView, context: Context) {
-        uiView.preferredFramesPerSecond = 60
+        uiView.preferredFramesPerSecond = 120
         uiView.contentScaleFactor = UIScreen.main.scale * 2
         // No need to reconfigure scene here
     }
