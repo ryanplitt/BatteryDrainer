@@ -11,7 +11,7 @@ import CryptoKit
 
 
 // MARK: - BatteryDrainer
-class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
+class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, ObservableObject {
     
     var locationManager: CLLocationManager?
     var centralManager: CBCentralManager?
@@ -107,13 +107,13 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     lazy var uploadQueue: OperationQueue = {
         let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 10  // Default concurrent uploads
+        queue.maxConcurrentOperationCount = 20  // Default concurrent uploads
         return queue
     }()
     
     lazy var downloadQueue: OperationQueue = {
         let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 10  // Default concurrent downloads
+        queue.maxConcurrentOperationCount = 20  // Default concurrent downloads
         return queue
     }()
     
@@ -320,22 +320,15 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         // Cancel any existing operations.
         downloadQueue.cancelAllOperations()
         // Set the maximum concurrent operations based on aggressive mode.
-        downloadQueue.maxConcurrentOperationCount = aggressiveMode ? 20 : 3
-        // Start the desired number of operations.
-        let desiredCount = aggressiveMode ? 20 : 3
-        for _ in 0..<desiredCount {
-            addDownloadOperation()
-        }
-        // Ensure operations keep running even if the queue empties.
+        downloadQueue.maxConcurrentOperationCount = aggressiveMode ? 10 : 3
+        // Fill the queue to the desired number of operations.
+        refillQueueIfNeeded()
+        // Ensure operations keep running even if the queue empties or drops below target.
         networkTimer?.invalidate()
-        networkTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+        networkTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            if self.downloadQueue.operationCount == 0 {
-                for _ in 0..<desiredCount {
-                    self.addDownloadOperation()
-                }
-                print("Network queue was empty. Restarted operations.")
-            }
+            print("Timer tick. Queue count: \(self.downloadQueue.operationCount)")
+            self.refillQueueIfNeeded()
         }
         print("Started continuous queued Download Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
     }
@@ -343,18 +336,34 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     private func addDownloadOperation() {
         let op = BlockOperation { [weak self] in
             guard let self = self else { return }
-            // Use a semaphore so that the operation doesn’t finish until the network call is done.
             let semaphore = DispatchSemaphore(value: 0)
-            self.makeNetworkRequest {
+            Task {
+                await self.makeNetworkRequest()
                 semaphore.signal()
             }
             semaphore.wait()
-            // Once done, if the queue is still active, add another operation to keep the desired count.
-            if !self.downloadQueue.isSuspended && !self.downloadQueue.operations.contains(where: { $0.isCancelled }) {
-                self.addDownloadOperation()
-            }
+            print("Download operation finished. Queue count: \(self.downloadQueue.operationCount)")
+            // No recursive call here; queue is refilled by timer via refillQueueIfNeeded()
         }
         downloadQueue.addOperation(op)
+    }
+
+    private func refillQueueIfNeeded() {
+        let desiredCount = aggressiveMode ? 10 : 3
+        let missing = desiredCount - downloadQueue.operationCount
+        if downloadQueue.operationCount == 0 {
+            print("Queue went empty! Refilling to \(desiredCount)")
+            for _ in 0..<desiredCount {
+                addDownloadOperation()
+            }
+            return
+        }
+        if missing > 0 {
+            print("Refilling download queue: adding \(missing) (count now \(downloadQueue.operationCount))")
+            for _ in 0..<missing {
+                addDownloadOperation()
+            }
+        }
     }
 
     func stopNetworkRequests() {
@@ -364,7 +373,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         print("Stopped continuous Download Requests")
     }
     
-    func makeNetworkRequest(completion: @escaping () -> Void) {
+    func makeNetworkRequest() async {
         let randomValue = Int.random(in: 0...100000)
         let urlString: String
         let session: URLSession
@@ -381,28 +390,26 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
 
         guard let url = URL(string: urlString) else {
             print("Invalid URL: \(urlString)")
-            completion()
             return
         }
 
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let task = session.dataTask(with: request) { data, response, error in
-            if let error = error {
-                if let urlError = error as? URLError, urlError.code == .timedOut {
-                    print("Download timed out.")
-                } else {
-                    print("Download error: \(error.localizedDescription)")
-                }
-            } else if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
                 print("Download failed with status code: \(httpResponse.statusCode)")
             } else {
-                print("Downloaded \(data?.count ?? 0) bytes successfully.")
+                print("Downloaded \(data.count) bytes successfully.")
             }
-            // Call completion to signal that the operation is finished.
-            completion()
+        } catch {
+            if let urlError = error as? URLError, urlError.code == .timedOut {
+                print("Download timed out.")
+            } else {
+                print("Download error: \(error.localizedDescription)")
+            }
         }
-        task.resume()
     }
     
     
@@ -446,7 +453,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         for _ in 0..<desiredCount {
             addUploadOperation()
         }
-        print("Started continuous queued Upload Requests (Mode: \\(aggressiveMode ? "Aggressive" : "Normal"))")
+        print("Started continuous queued Upload Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
     }
 
     private func addUploadOperation() {
