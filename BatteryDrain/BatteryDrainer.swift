@@ -19,6 +19,8 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     var cpuWorkItems: [DispatchWorkItem] = []
     var hapticTimer: Timer?
     var networkTimer: Timer?
+    /// Indicates that network download operations should keep running
+    var networkActive: Bool = false
     var uploadTimer: Timer?
     var captureSession: AVCaptureSession?
     var audioRecorder: AVAudioRecorder?
@@ -317,6 +319,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     // MARK: Network Requests (Download)
     func startNetworkRequests() {
+        networkActive = true
         // Cancel any existing operations.
         downloadQueue.cancelAllOperations()
         // Set the maximum concurrent operations based on aggressive mode.
@@ -334,7 +337,8 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     }
 
     private func addDownloadOperation() {
-        let op = BlockOperation { [weak self] in
+        var op: BlockOperation!
+        op = BlockOperation { [weak self] in
             guard let self = self else { return }
             let semaphore = DispatchSemaphore(value: 0)
             Task {
@@ -343,7 +347,10 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             }
             semaphore.wait()
             print("Download operation finished. Queue count: \(self.downloadQueue.operationCount)")
-            // No recursive call here; queue is refilled by timer via refillQueueIfNeeded()
+            // Immediately queue another download while active
+            if self.networkActive && !op.isCancelled {
+                self.addDownloadOperation()
+            }
         }
         downloadQueue.addOperation(op)
     }
@@ -367,6 +374,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     }
 
     func stopNetworkRequests() {
+        networkActive = false
         networkTimer?.invalidate()
         networkTimer = nil
         downloadQueue.cancelAllOperations()
