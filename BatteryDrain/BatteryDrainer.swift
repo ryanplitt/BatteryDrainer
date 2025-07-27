@@ -186,6 +186,11 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
                     // Add some additional CPU-intensive operations
                     self.performAdditionalCPUWork()
                     
+                    // Add matrix operations for even more CPU stress
+                    if counter % 5 == 0 {
+                        self.performMatrixOperations()
+                    }
+                    
                     counter += 1
                     // Check cancellation more frequently for responsiveness
                     if counter % 10 == 0 && localWorkItem.isCancelled {
@@ -256,6 +261,16 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     func startAudioTone() {
         audioEngine = AVAudioEngine()
         guard let engine = audioEngine else { return }
+        
+        // Configure audio session for playback
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Audio session configuration error: \(error)")
+            return
+        }
+        
         let mainMixer = engine.mainMixerNode
         let output = engine.outputNode
         let format = output.inputFormat(forBus: 0)
@@ -417,6 +432,11 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
 
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
+        
+        // Add headers to increase request complexity
+        request.setValue("BatteryDrainer/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("gzip, deflate, br", forHTTPHeaderField: "Accept-Encoding")
 
         do {
             let (data, response) = try await session.data(for: request)
@@ -424,6 +444,19 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
                 print("Download failed with status code: \(httpResponse.statusCode)")
             } else {
                 print("Downloaded \(data.count) bytes successfully.")
+                
+                // Additional processing of downloaded data to increase CPU load
+                if aggressiveMode && data.count > 1000 {
+                    // Process the data to add CPU load
+                    let processedData = data.withUnsafeBytes { bytes in
+                        var checksum: UInt32 = 0
+                        for byte in bytes {
+                            checksum = checksum &+ UInt32(byte)
+                        }
+                        return checksum
+                    }
+                    _ = processedData // Prevent optimization
+                }
             }
         } catch {
             if let urlError = error as? URLError, urlError.code == .timedOut {
@@ -592,7 +625,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             
         } catch {
             print("Audio Recording setup/start error: \(error)")
-            try? session.setActive(false) // Try to deactivate session on error
+            // Don't deactivate session here as it might be used by audio tone
         }
     }
     
@@ -607,9 +640,8 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             // print("Deleted temporary recording file: \(url.lastPathComponent)")
         }
         audioRecorder = nil
-        // Deactivate session if no longer needed by other components (like audio tone)
-        // Note: This might conflict if audio tone is also running. Manage session state carefully.
-        // try? AVAudioSession.sharedInstance().setActive(false)
+        // Don't deactivate session here as it might be used by audio tone
+        // Session will be deactivated in ContentView.onDisappear
     }
     
     
@@ -631,6 +663,39 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         }
         // Prevent compiler optimization by using the result
         _ = result
+    }
+    
+    // MARK: Additional CPU Stress Functions
+    func performMatrixOperations() {
+        // Perform intensive matrix operations
+        let size = 100
+        var matrix = Array(repeating: Array(repeating: 0.0, count: size), count: size)
+        
+        // Fill with random values
+        for i in 0..<size {
+            for j in 0..<size {
+                matrix[i][j] = Double.random(in: -1.0...1.0)
+            }
+        }
+        
+        // Perform matrix multiplication (O(n³) complexity)
+        var result = Array(repeating: Array(repeating: 0.0, count: size), count: size)
+        for i in 0..<size {
+            for j in 0..<size {
+                for k in 0..<size {
+                    result[i][j] += matrix[i][k] * matrix[k][j]
+                }
+            }
+        }
+        
+        // Additional operations on result
+        for i in 0..<size {
+            for j in 0..<size {
+                result[i][j] = sqrt(abs(result[i][j])) + sin(result[i][j])
+            }
+        }
+        
+        _ = result // Prevent optimization
     }
     
     
@@ -663,7 +728,17 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
                         print("Storage I/O: Read \(dataRead.count) bytes successfully.")
                     }
                     
-                    // 4. Delete file
+                    // 4. Additional file operations for more stress
+                    let additionalFiles = 3
+                    for i in 1...additionalFiles {
+                        let additionalPath = tempDir.appendingPathComponent("temp_\(i).dat")
+                        let smallData = Data.randomData(length: 1024 * 1024) // 1MB files
+                        try? smallData.write(to: additionalPath, options: .atomic)
+                        try? Data(contentsOf: additionalPath)
+                        try? fileManager.removeItem(at: additionalPath)
+                    }
+                    
+                    // 5. Delete main file
                     try fileManager.removeItem(at: filePath)
                     // print("Storage I/O: Deleted file.")
                     
@@ -802,7 +877,9 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             // Request again if appropriate for the UI flow
             // manager.requestAlwaysAuthorization()
         @unknown default:
-            fatalError("Unknown CLLocationManagerAuthorizationStatus")
+            print("Unknown location authorization status: \(manager.authorizationStatus)")
+            // Handle gracefully instead of crashing
+            stopLocationUpdates()
         }
     }
     

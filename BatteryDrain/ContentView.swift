@@ -246,6 +246,9 @@ struct ContentView: View {
                     motionUpdatesEnabled = false
                     record4KEnabled = false
                     aggressiveModeEnabled = false
+                    
+                    // Ensure audio session is properly deactivated
+                    try? AVAudioSession.sharedInstance().setActive(false)
                 }
             }
         }

@@ -7,5 +7,15 @@
 		<string>location</string>
 		<string>processing</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>This app uses the camera for battery drain testing via video recording and processing.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>This app uses the microphone for battery drain testing via audio recording.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app uses location services for battery drain testing via GPS updates.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app uses location services for battery drain testing via GPS updates.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>This app uses Bluetooth for battery drain testing via peripheral scanning.</string>
 </dict>
 </plist>

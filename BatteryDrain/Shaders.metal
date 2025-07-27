@@ -25,7 +25,20 @@ kernel void heavyCompute(device float *buf [[ buffer(0) ]],
         result += pow(x + iter, 2.5) * sqrt(y + iter + 1.0);
         result += exp(x * 0.1 + iter) * log(y + iter + 1.0);
         result += atan2(x + iter, y + iter);
+        
+        // Additional intensive operations
+        result += tan(x * 50.0 + iter) * asin(clamp(y + iter, -1.0, 1.0));
+        result += cosh(x + iter) * sinh(y + iter);
+        result += pow(abs(x + iter), 3.0) * pow(abs(y + iter), 2.0);
+        
+        // Complex trigonometric combinations
+        float angle = x * 200.0 + y * 200.0 + iter;
+        result += sin(angle) * cos(angle * 2.0) * tan(angle * 0.5);
     }
+    
+    // Additional post-processing to increase GPU load
+    result = fmod(result, 1000.0); // Keep result manageable
+    result = sqrt(abs(result)) + sin(result) + cos(result);
     
     buf[gid.x + gid.y * 4096] = result;
 }

@@ -8,14 +8,42 @@ class MetalComputeUIView: MTKView {
 
     override init(frame: CGRect, device: MTLDevice?) {
         super.init(frame: frame, device: device ?? MTLCreateSystemDefaultDevice())
-        guard let dev = self.device else { return }
+        guard let dev = self.device else { 
+            print("Failed to create Metal device")
+            return 
+        }
+        
         cmdQueue = dev.makeCommandQueue()
+        guard let cmdQueue = cmdQueue else {
+            print("Failed to create Metal command queue")
+            return
+        }
+        
         // Allocate a buffer for compute shader to write into
         let elementCount = 4096 * 4096
         dataBuffer = dev.makeBuffer(length: elementCount * MemoryLayout<Float>.size, options: .storageModeShared)
-        let lib = dev.makeDefaultLibrary()!
-        let fn = lib.makeFunction(name: "heavyCompute")!
-        pipeline = try! dev.makeComputePipelineState(function: fn)
+        guard let dataBuffer = dataBuffer else {
+            print("Failed to create Metal buffer")
+            return
+        }
+        
+        guard let lib = dev.makeDefaultLibrary() else {
+            print("Failed to create Metal library")
+            return
+        }
+        
+        guard let fn = lib.makeFunction(name: "heavyCompute") else {
+            print("Failed to create Metal function 'heavyCompute'")
+            return
+        }
+        
+        do {
+            pipeline = try dev.makeComputePipelineState(function: fn)
+        } catch {
+            print("Failed to create compute pipeline: \(error)")
+            return
+        }
+        
         isPaused = false
         enableSetNeedsDisplay = false
         preferredFramesPerSecond = 60
@@ -25,7 +53,12 @@ class MetalComputeUIView: MTKView {
 
     override func draw(_ rect: CGRect) {
         guard let buf = cmdQueue.makeCommandBuffer(),
-              let enc = buf.makeComputeCommandEncoder() else { return }
+              let enc = buf.makeComputeCommandEncoder(),
+              let pipeline = pipeline else { 
+            print("Failed to create Metal command buffer or encoder")
+            return 
+        }
+        
         // Bind the buffer for index 0
         enc.setBuffer(dataBuffer, offset: 0, index: 0)
         enc.setComputePipelineState(pipeline)
