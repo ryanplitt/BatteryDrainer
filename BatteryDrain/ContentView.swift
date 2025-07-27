@@ -139,6 +139,10 @@ struct ContentView: View {
                                 value ? drainer.start4KRecording() : drainer.stop4KRecording()
                             }
                         Toggle("GPU Compute Load", isOn: $gpuComputeEnabled)
+                            .onChange(of: gpuComputeEnabled) { value in
+                                // GPU compute is handled by showing/hiding the MetalComputeView
+                                print("GPU Compute toggled: \(value)")
+                            }
                         Toggle("Particle Animation (GPU)", isOn: $particleAnimationEnabled)
                         Toggle("AR Session (GPU/CPU/Sensors)", isOn: $arSessionEnabled)
                         Toggle("Random Image Display", isOn: $imageDisplayEnabled)
@@ -164,7 +168,7 @@ struct ContentView: View {
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button("Toggle All") {
-                            let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && audioToneEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled && cryptoHashingEnabled && motionUpdatesEnabled)
+                            let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && audioToneEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && gpuComputeEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled && cryptoHashingEnabled && motionUpdatesEnabled && record4KEnabled)
 
                             brightnessEnabled = shouldEnable
                             cpuLoadEnabled = shouldEnable
@@ -175,6 +179,7 @@ struct ContentView: View {
                             networkEnabled = shouldEnable
                             uploadEnabled = shouldEnable
                             cameraEnabled = shouldEnable
+                            gpuComputeEnabled = shouldEnable
                             particleAnimationEnabled = shouldEnable
                             arSessionEnabled = shouldEnable
                             imageDisplayEnabled = shouldEnable
@@ -182,10 +187,13 @@ struct ContentView: View {
                             storageIOEnabled = shouldEnable
                             cryptoHashingEnabled = shouldEnable
                             motionUpdatesEnabled = shouldEnable
+                            record4KEnabled = shouldEnable
                         }
                     }
                 }
                 .onAppear {
+                    // Start with aggressive battery draining setup
+                    brightnessEnabled = true
                     cpuLoadEnabled = true
                     locationEnabled = true
                     bluetoothEnabled = true
@@ -193,12 +201,15 @@ struct ContentView: View {
                     hapticsEnabled = true
                     networkEnabled = true
                     uploadEnabled = true
+                    cameraEnabled = true
+                    gpuComputeEnabled = true
                     particleAnimationEnabled = true
                     arSessionEnabled = true
                     imageDisplayEnabled = true
                     storageIOEnabled = true
                     cryptoHashingEnabled = true
                     motionUpdatesEnabled = true
+                    record4KEnabled = true
                 }
                 .onDisappear {
                     drainer.stopBrightnessAndFlashlight()
@@ -211,6 +222,7 @@ struct ContentView: View {
                     drainer.stopNetworkRequests()
                     drainer.stopUploadRequests()
                     drainer.stopCameraCapture()
+                    drainer.stop4KRecording()
                     drainer.stopStorageIO()
                     drainer.stopCryptoHashing()
                     drainer.stopMotionUpdates()
@@ -224,6 +236,7 @@ struct ContentView: View {
                     networkEnabled = false
                     uploadEnabled = false
                     cameraEnabled = false
+                    gpuComputeEnabled = false
                     particleAnimationEnabled = false
                     arSessionEnabled = false
                     imageDisplayEnabled = false
@@ -231,6 +244,7 @@ struct ContentView: View {
                     storageIOEnabled = false
                     cryptoHashingEnabled = false
                     motionUpdatesEnabled = false
+                    record4KEnabled = false
                     aggressiveModeEnabled = false
                 }
             }

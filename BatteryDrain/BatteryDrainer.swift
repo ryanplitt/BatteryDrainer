@@ -1,5 +1,4 @@
 import Foundation
-import Foundation
 import SwiftUI
 import AVFoundation
 import CoreLocation
@@ -10,22 +9,24 @@ import CoreImage
 import CoreMotion
 import CryptoKit
 
-
 // MARK: - BatteryDrainer
 class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, ObservableObject {
     
+    // MARK: - Network Properties
+    private var downloadQueue = OperationQueue()
     private var isAggressiveNetworkLoopRunning = false
     private var isAggressiveUploadLoopRunning = false
     
+    // MARK: - Core Properties
     var locationManager: CLLocationManager?
     var centralManager: CBCentralManager?
     var audioEngine: AVAudioEngine?
     var cpuWorkItems: [DispatchWorkItem] = []
-    var hapticTimer: Timer?
+    var hapticTimer: DispatchSourceTimer?
     var networkTimer: Timer?
     /// Indicates that network download operations should keep running
     var networkActive: Bool = false
-    var uploadTimer: Timer?
+    var uploadTimer: DispatchSourceTimer?
     var captureSession: AVCaptureSession?
     var audioRecorder: AVAudioRecorder?
     var aggressiveMode: Bool = false
@@ -38,6 +39,34 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     private var videoInput: AVAssetWriterInput?
     private var recordSession: AVCaptureSession?
     private var recordOutput: AVCaptureVideoDataOutput?
+
+    // MARK: - Storage I/O Properties
+    var storageIOWorkItem: DispatchWorkItem?
+    let storageIOFileName = "largeTempFile.dat"
+    let storageIODataSize = 50 * 1024 * 1024 // 50 MB for more intensive I/O
+
+    // MARK: - Additional Properties for Battery Drain
+    var cryptoWorkItem: DispatchWorkItem?
+    var motionManager: CMMotionManager?
+    
+    // MARK: - Camera Processing Properties
+    let ciContext = CIContext() // Context for Core Image processing
+    let blurFilter = CIFilter(name: "CIGaussianBlur")! // Heavy blur filter
+    
+    lazy var aggressiveSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        // Increase the number of allowed concurrent connections.
+        config.httpMaximumConnectionsPerHost = 50 // Keep this high for aggressive mode
+        config.timeoutIntervalForRequest = 30 // Shorter timeout to keep requests cycling
+        config.timeoutIntervalForResource = 30
+        return URLSession(configuration: config)
+    }()
+    
+    override init() {
+        super.init()
+        downloadQueue.maxConcurrentOperationCount = 3
+        downloadQueue.qualityOfService = .background
+    }
 
     func start4KRecording() {
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("drain_4k.mp4")
@@ -88,29 +117,6 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         recordSession = nil
         recordOutput = nil
     }
-    
-    // MARK: Added - Properties for Storage I/O Load
-    var storageIOWorkItem: DispatchWorkItem?
-    let storageIOFileName = "largeTempFile.dat"
-    let storageIODataSize = 10 * 1024 * 1024 // 10 MB
-
-    // MARK: Additional Properties for Battery Drain
-    var cryptoWorkItem: DispatchWorkItem?
-    var motionManager: CMMotionManager?
-    
-    // MARK: Added - Properties for Camera Processing
-    let ciContext = CIContext() // Context for Core Image processing
-    let blurFilter = CIFilter(name: "CIGaussianBlur")! // Heavy blur filter
-    
-    lazy var aggressiveSession: URLSession = {
-        let config = URLSessionConfiguration.default
-        // Increase the number of allowed concurrent connections.
-        config.httpMaximumConnectionsPerHost = 50 // Keep this high for aggressive mode
-        config.timeoutIntervalForRequest = 30 // Shorter timeout to keep requests cycling
-        config.timeoutIntervalForResource = 30
-        return URLSession(configuration: config)
-    }()
-    
     
     // MARK: Max Brightness & Flashlight
     func startBrightnessAndFlashlight() {
@@ -170,13 +176,21 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             localWorkItem = DispatchWorkItem { [weak self] in
                 guard let self = self else { return }
                 print("CPU Thread \(i) started.")
-                // Use a larger Fibonacci number for heavier CPU load
-                let fibNumber = 40
+                // Use even larger Fibonacci numbers and multiple computations for maximum CPU load
+                let fibNumbers = [42, 43, 44, 45] // Multiple large fibonacci numbers
+                var counter = 0
                 while !localWorkItem.isCancelled {
+                    let fibNumber = fibNumbers[counter % fibNumbers.count]
                     _ = self.fibonacci(fibNumber)
-                    // Optional: Add a tiny sleep if it completely freezes the UI,
-                    // but for pure drain, no sleep is better.
-                    // Thread.sleep(forTimeInterval: 0.001)
+                    
+                    // Add some additional CPU-intensive operations
+                    self.performAdditionalCPUWork()
+                    
+                    counter += 1
+                    // Check cancellation more frequently for responsiveness
+                    if counter % 10 == 0 && localWorkItem.isCancelled {
+                        break
+                    }
                 }
                 print("CPU Thread \(i) cancelled.")
             }
@@ -313,13 +327,16 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     
     // MARK: Network Requests (Download)
+    func startNetworkRequests() {
         networkActive = true
         // Cancel any existing operations.
         downloadQueue.cancelAllOperations()
         // Set the maximum concurrent operations based on aggressive mode.
         downloadQueue.maxConcurrentOperationCount = aggressiveMode ? 10 : 3
+        
         // Fill the queue to the desired number of operations.
         refillQueueIfNeeded()
+        
         // Ensure operations keep running even if the queue empties or drops below target.
         networkTimer?.invalidate()
         networkTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -331,16 +348,17 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     }
 
     private func addDownloadOperation() {
-        var op: BlockOperation!
-        op = BlockOperation { [weak self] in
+        let op = BlockOperation { [weak self] in
             guard let self = self else { return }
             let semaphore = DispatchSemaphore(value: 0)
-            isAggressiveNetworkLoopRunning = true
+            
+            Task {
                 await self.makeNetworkRequest()
                 semaphore.signal()
             }
             semaphore.wait()
             print("Download operation finished. Queue count: \(self.downloadQueue.operationCount)")
+            
             // Immediately queue another download while active
             if self.networkActive && !op.isCancelled {
                 self.addDownloadOperation()
@@ -352,6 +370,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     private func refillQueueIfNeeded() {
         let desiredCount = aggressiveMode ? 10 : 3
         let missing = desiredCount - downloadQueue.operationCount
+        
         if downloadQueue.operationCount == 0 {
             print("Queue went empty! Refilling to \(desiredCount)")
             for _ in 0..<desiredCount {
@@ -359,19 +378,19 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             }
             return
         }
+        
         if missing > 0 {
             print("Refilling download queue: adding \(missing) (count now \(downloadQueue.operationCount))")
             for _ in 0..<missing {
                 addDownloadOperation()
             }
-            networkTimer = timer
         }
-        print("Started Network Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
     }
 
+    func stopNetworkRequests() {
         networkActive = false
+        downloadQueue.cancelAllOperations()
         networkTimer?.invalidate()
-        networkTimer?.cancel()
         networkTimer = nil
         print("Stopped Network Requests")
     }
@@ -455,6 +474,8 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             Task {
                 while self.isAggressiveUploadLoopRunning {
                     await self.makeUploadRequest()
+                    // Small delay in aggressive mode to prevent overwhelming
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
                 }
             }
         } else {
@@ -592,13 +613,24 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     }
     
     
-    // MARK: Recursive Fibonacci for heavy CPU load
-    // ... (fibonacci remains ) ...
+    // MARK: CPU Load Functions
     func fibonacci(_ n: Int) -> Int {
         // Base cases
         if n <= 1 { return n }
         // Recursive step
         return fibonacci(n - 1) + fibonacci(n - 2)
+    }
+    
+    func performAdditionalCPUWork() {
+        // Additional CPU-intensive operations to maximize load
+        var result: Double = 0.0
+        for i in 0..<10000 {
+            result += sin(Double(i)) * cos(Double(i))
+            result += sqrt(Double(i + 1))
+            result += pow(Double(i), 2.5)
+        }
+        // Prevent compiler optimization by using the result
+        _ = result
     }
     
     
@@ -645,9 +677,8 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
                     Thread.sleep(forTimeInterval: 0.5)
                 }
                 
-                // Add a small delay to prevent overwhelming the system completely
-                // and allow cancellation check to be more responsive. Adjust as needed.
-                Thread.sleep(forTimeInterval: 0.05) // 50 milliseconds
+                // Minimal delay for maximum I/O stress
+                Thread.sleep(forTimeInterval: 0.01) // 10 milliseconds - more aggressive
             }
             print("Storage I/O Load cancelled.")
             // Cleanup file if it exists when cancelled
@@ -673,8 +704,16 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         cryptoWorkItem = DispatchWorkItem { [weak self] in
             guard let self = self, let work = self.cryptoWorkItem else { return }
             while !work.isCancelled {
-                let data = Data.randomData(length: 1_000_000)
+                // Use larger data and multiple hash algorithms for maximum CPU load
+                let data = Data.randomData(length: 5_000_000) // 5MB instead of 1MB
                 _ = SHA256.hash(data: data)
+                _ = SHA512.hash(data: data)
+                
+                // Additional intensive hashing rounds
+                var hashResult = data
+                for _ in 0..<10 {
+                    hashResult = Data(SHA256.hash(data: hashResult))
+                }
             }
         }
         DispatchQueue.global(qos: .userInitiated).async(execute: cryptoWorkItem!)

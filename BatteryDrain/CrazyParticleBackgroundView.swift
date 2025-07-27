@@ -12,9 +12,9 @@ struct CrazyParticleBackgroundView: UIViewRepresentable {
         emitter.emitterPosition = CGPoint(x: view.bounds.midX, y: view.bounds.maxY)
         emitter.emitterSize = CGSize(width: view.bounds.width, height: 1)
         
-        // Create multiple emitter cells for a crazy effect
+        // Create multiple emitter cells for a crazy effect - increased for more GPU load
         var cells: [CAEmitterCell] = []
-        for _ in 0..<10 {
+        for _ in 0..<25 {
             let cell = CAEmitterCell()
             // Create a white circle programmatically
             let size = CGSize(width: 10, height: 10)
@@ -25,8 +25,8 @@ struct CrazyParticleBackgroundView: UIViewRepresentable {
             }
             cell.contents = image.cgImage
             
-            cell.birthRate = 50
-            cell.lifetime = 5.0
+            cell.birthRate = 150 // Increased for more particles
+            cell.lifetime = 8.0 // Longer lifetime for more on screen
             cell.velocity = CGFloat.random(in: 100...200)
             cell.velocityRange = 50
             cell.emissionLongitude = -CGFloat.pi/2
