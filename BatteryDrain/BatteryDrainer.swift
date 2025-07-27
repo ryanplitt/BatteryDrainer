@@ -1,4 +1,5 @@
 import Foundation
+import Foundation
 import SwiftUI
 import AVFoundation
 import CoreLocation
@@ -12,6 +13,9 @@ import CryptoKit
 
 // MARK: - BatteryDrainer
 class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, ObservableObject {
+    
+    private var isAggressiveNetworkLoopRunning = false
+    private var isAggressiveUploadLoopRunning = false
     
     var locationManager: CLLocationManager?
     var centralManager: CBCentralManager?
@@ -102,22 +106,11 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         let config = URLSessionConfiguration.default
         // Increase the number of allowed concurrent connections.
         config.httpMaximumConnectionsPerHost = 50 // Keep this high for aggressive mode
-        config.timeoutIntervalForRequest = 10 // Shorter timeout to keep requests cycling
-        config.timeoutIntervalForResource = 10
+        config.timeoutIntervalForRequest = 30 // Shorter timeout to keep requests cycling
+        config.timeoutIntervalForResource = 30
         return URLSession(configuration: config)
     }()
     
-    lazy var uploadQueue: OperationQueue = {
-        let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 20  // Default concurrent uploads
-        return queue
-    }()
-    
-    lazy var downloadQueue: OperationQueue = {
-        let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 20  // Default concurrent downloads
-        return queue
-    }()
     
     // MARK: Max Brightness & Flashlight
     func startBrightnessAndFlashlight() {
@@ -288,28 +281,30 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     func startHaptics() {
         // Ensure clean start
         stopHaptics()
-        
+
         // Use heaviest impact possible
         hapticGenerator = UIImpactFeedbackGenerator(style: .heavy)
         hapticGenerator?.prepare() // Prepare initially
-        
+
         // Use a faster interval for more drain
         let interval: TimeInterval = 0.25 // Faster interval for more drain
-        
-        hapticTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .background))
+        timer.schedule(deadline: .now() + interval, repeating: interval)
+        timer.setEventHandler { [weak self] in
             guard let self = self else { return }
-            // Trigger impact
-            self.hapticGenerator?.impactOccurred()
-            
-            // Re-prepare immediately after for the next potential impact.
-            // This keeps the Taptic engine primed, potentially using more power.
-            self.hapticGenerator?.prepare()
+            DispatchQueue.main.async {
+                self.hapticGenerator?.impactOccurred()
+                self.hapticGenerator?.prepare()
+            }
         }
+        timer.resume()
+        hapticTimer = timer
         print("Started Haptics")
     }
-    
+
     func stopHaptics() {
-        hapticTimer?.invalidate()
+        hapticTimer?.cancel()
         hapticTimer = nil
         // Release the generator
         hapticGenerator = nil
@@ -318,7 +313,6 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     
     // MARK: Network Requests (Download)
-    func startNetworkRequests() {
         networkActive = true
         // Cancel any existing operations.
         downloadQueue.cancelAllOperations()
@@ -341,7 +335,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         op = BlockOperation { [weak self] in
             guard let self = self else { return }
             let semaphore = DispatchSemaphore(value: 0)
-            Task {
+            isAggressiveNetworkLoopRunning = true
                 await self.makeNetworkRequest()
                 semaphore.signal()
             }
@@ -370,15 +364,16 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             for _ in 0..<missing {
                 addDownloadOperation()
             }
+            networkTimer = timer
         }
+        print("Started Network Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
     }
 
-    func stopNetworkRequests() {
         networkActive = false
         networkTimer?.invalidate()
+        networkTimer?.cancel()
         networkTimer = nil
-        downloadQueue.cancelAllOperations()
-        print("Stopped continuous Download Requests")
+        print("Stopped Network Requests")
     }
     
     func makeNetworkRequest() async {
@@ -422,7 +417,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     
     
     // MARK: Upload Requests
-    func makeUploadRequest(completion: @escaping () -> Void) {
+    func makeUploadRequest() async {
         let urlString: String
         if aggressiveMode {
             urlString = "http://192.168.0.80:3434/upload"
@@ -430,58 +425,56 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             urlString = "https://httpbin.org/post"
         }
         guard let url = URL(string: urlString) else {
-            completion()
+            print("Invalid URL: \(urlString)")
             return
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         
-        let payloadSize = aggressiveMode ? 30_000_000 : 5_000_000
+        let payloadSize = aggressiveMode ? 50_000_000 : 5_000_000
         let data = Data(repeating: 0xDE, count: payloadSize)
         
         let session = aggressiveMode ? aggressiveSession : URLSession.shared
-        let task = session.uploadTask(with: request, from: data) { data, response, error in
-            if let error = error {
-                print("Upload error: \(error.localizedDescription)")
+        do {
+            let (responseData, response) = try await session.upload(for: request, from: data)
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                print("Upload failed with status code: \(httpResponse.statusCode)")
             } else {
-                print("Upload succeeded for \(payloadSize) bytes.")
+                print("Upload succeeded for \(payloadSize) bytes. Response size: \(responseData.count) bytes.")
             }
-            completion()
+        } catch {
+            print("Upload error: \(error.localizedDescription)")
         }
-        task.resume()
     }
     
     func startUploadRequests() {
-        // Cancel any existing upload operations.
-        uploadQueue.cancelAllOperations()
-        // Set the maximum concurrent operations.
-        uploadQueue.maxConcurrentOperationCount = aggressiveMode ? 20 : 3
-        let desiredCount = aggressiveMode ? 20 : 3
-        for _ in 0..<desiredCount {
-            addUploadOperation()
-        }
-        print("Started continuous queued Upload Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
-    }
-
-    private func addUploadOperation() {
-        let op = BlockOperation { [weak self] in
-            guard let self = self else { return }
-            let semaphore = DispatchSemaphore(value: 0)
-            self.makeUploadRequest {
-                semaphore.signal()
+        stopUploadRequests()
+        if aggressiveMode {
+            isAggressiveUploadLoopRunning = true
+            Task {
+                while self.isAggressiveUploadLoopRunning {
+                    await self.makeUploadRequest()
+                }
             }
-            semaphore.wait()
-            if !self.uploadQueue.isSuspended && !self.uploadQueue.operations.contains(where: { $0.isCancelled }) {
-                self.addUploadOperation()
+        } else {
+            let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .background))
+            timer.schedule(deadline: .now() + 3.0, repeating: 3.0)
+            timer.setEventHandler { [weak self] in
+                guard let self = self else { return }
+                Task { await self.makeUploadRequest() }
             }
+            timer.resume()
+            uploadTimer = timer
         }
-        uploadQueue.addOperation(op)
+        print("Started Upload Requests (Mode: \(aggressiveMode ? "Aggressive" : "Normal"))")
     }
 
     func stopUploadRequests() {
-        uploadQueue.cancelAllOperations()
-        print("Stopped continuous Upload Requests")
+        isAggressiveUploadLoopRunning = false
+        uploadTimer?.cancel()
+        uploadTimer = nil
+        print("Stopped Upload Requests")
     }
     
     // MARK: Camera Capture
