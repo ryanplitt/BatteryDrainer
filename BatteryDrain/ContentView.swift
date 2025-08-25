@@ -11,7 +11,6 @@ import MetalKit
 struct ContentView: View {
     @State private var record4KEnabled = false
     @State private var gpuComputeEnabled = false
-    @State private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     @State private var brightnessEnabled = false
     @State private var cpuLoadEnabled = false
     @State private var locationEnabled = false
@@ -50,18 +49,13 @@ struct ContentView: View {
     
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .top) {
                 if particleAnimationEnabled {
                     CrazyParticleBackgroundView()
                         .allowsHitTesting(false)
                         .ignoresSafeArea()
                 }
-                Form {
-                    Section {
-                        Text("Thermal State: \(thermalState)")
-                            .foregroundColor(backgroundColor(for: thermalState))
-                    }
-
+                List {
                     Section("Aggressive Mode") {
                         Toggle("Aggressive Mode (Max Network/CPU)", isOn: $aggressiveModeEnabled)
                             .toggleStyle(SwitchToggleStyle(tint: .red))
@@ -164,91 +158,41 @@ struct ContentView: View {
                             .cornerRadius(8)
                     }
                 }
-                .navigationTitle("Battery Drainer Extreme")
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Toggle All") {
-                            let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && audioToneEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && gpuComputeEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled && cryptoHashingEnabled && motionUpdatesEnabled && record4KEnabled)
+                .background(backgroundColor(for: drainer.thermalState))
+                
+                // Always-visible thermal state overlay
+                Text("Thermal State: \(drainer.thermalState)")
+                    .padding(8)
+                    .background(Color.black.opacity(0.7))
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+                    .padding(.top, 10)
+            }
+            .navigationTitle("Battery Drainer Extreme")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Toggle All") {
+                        let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && audioToneEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && gpuComputeEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled && cryptoHashingEnabled && motionUpdatesEnabled && record4KEnabled)
 
-                            brightnessEnabled = shouldEnable
-                            cpuLoadEnabled = shouldEnable
-                            locationEnabled = shouldEnable
-                            bluetoothEnabled = shouldEnable
-                            audioToneEnabled = shouldEnable
-                            hapticsEnabled = shouldEnable
-                            networkEnabled = shouldEnable
-                            uploadEnabled = shouldEnable
-                            cameraEnabled = shouldEnable
-                            gpuComputeEnabled = shouldEnable
-                            particleAnimationEnabled = shouldEnable
-                            arSessionEnabled = shouldEnable
-                            imageDisplayEnabled = shouldEnable
-                            audioRecordingEnabled = shouldEnable
-                            storageIOEnabled = shouldEnable
-                            cryptoHashingEnabled = shouldEnable
-                            motionUpdatesEnabled = shouldEnable
-                            record4KEnabled = shouldEnable
-                        }
+                        brightnessEnabled = shouldEnable
+                        cpuLoadEnabled = shouldEnable
+                        locationEnabled = shouldEnable
+                        bluetoothEnabled = shouldEnable
+                        audioToneEnabled = shouldEnable
+                        hapticsEnabled = shouldEnable
+                        networkEnabled = shouldEnable
+                        uploadEnabled = shouldEnable
+                        cameraEnabled = shouldEnable
+                        gpuComputeEnabled = shouldEnable
+                        particleAnimationEnabled = shouldEnable
+                        arSessionEnabled = shouldEnable
+                        imageDisplayEnabled = shouldEnable
+                        audioRecordingEnabled = shouldEnable
+                        storageIOEnabled = shouldEnable
+                        cryptoHashingEnabled = shouldEnable
+                        motionUpdatesEnabled = shouldEnable
+                        record4KEnabled = shouldEnable
                     }
-                }
-                .onAppear {
-                    // Start with aggressive battery draining setup
-                    brightnessEnabled = true
-                    cpuLoadEnabled = true
-                    locationEnabled = true
-                    bluetoothEnabled = true
-                    audioRecordingEnabled = true
-                    hapticsEnabled = true
-                    networkEnabled = true
-                    uploadEnabled = true
-                    cameraEnabled = true
-                    gpuComputeEnabled = true
-                    particleAnimationEnabled = true
-                    arSessionEnabled = true
-                    imageDisplayEnabled = true
-                    storageIOEnabled = true
-                    cryptoHashingEnabled = true
-                    motionUpdatesEnabled = true
-                    record4KEnabled = true
-                }
-                .onDisappear {
-                    drainer.stopBrightnessAndFlashlight()
-                    drainer.stopCPULoad()
-                    drainer.stopLocationUpdates()
-                    drainer.stopBluetoothScanning()
-                    drainer.stopAudioTone()
-                    drainer.stopAudioRecording()
-                    drainer.stopHaptics()
-                    drainer.stopNetworkRequests()
-                    drainer.stopUploadRequests()
-                    drainer.stopCameraCapture()
-                    drainer.stop4KRecording()
-                    drainer.stopStorageIO()
-                    drainer.stopCryptoHashing()
-                    drainer.stopMotionUpdates()
-
-                    brightnessEnabled = false
-                    cpuLoadEnabled = false
-                    locationEnabled = false
-                    bluetoothEnabled = false
-                    audioToneEnabled = false
-                    hapticsEnabled = false
-                    networkEnabled = false
-                    uploadEnabled = false
-                    cameraEnabled = false
-                    gpuComputeEnabled = false
-                    particleAnimationEnabled = false
-                    arSessionEnabled = false
-                    imageDisplayEnabled = false
-                    audioRecordingEnabled = false
-                    storageIOEnabled = false
-                    cryptoHashingEnabled = false
-                    motionUpdatesEnabled = false
-                    record4KEnabled = false
-                    aggressiveModeEnabled = false
-                    
-                    // Ensure audio session is properly deactivated
-                    try? AVAudioSession.sharedInstance().setActive(false)
                 }
             }
         }
@@ -258,10 +202,62 @@ struct ContentView: View {
             drainer.locationManager?.requestAlwaysAuthorization()
             AVCaptureDevice.requestAccess(for: .video) { granted in print("Camera access: \(granted)") }
             AVAudioSession.sharedInstance().requestRecordPermission() { granted in print("Microphone access: \(granted)") }
+            brightnessEnabled = true
+            cpuLoadEnabled = true
+            locationEnabled = true
+            bluetoothEnabled = true
+            audioRecordingEnabled = true
+            hapticsEnabled = true
+            networkEnabled = true
+            uploadEnabled = true
+            cameraEnabled = true
+            gpuComputeEnabled = true
+            particleAnimationEnabled = true
+            arSessionEnabled = true
+            imageDisplayEnabled = true
+            storageIOEnabled = true
+            cryptoHashingEnabled = true
+            motionUpdatesEnabled = true
+            record4KEnabled = true
         }
-        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
-            thermalState = ProcessInfo.processInfo.thermalState
-            print("Thermal state updated to \(thermalState)")
+        .onDisappear {
+            drainer.stopBrightnessAndFlashlight()
+            drainer.stopCPULoad()
+            drainer.stopLocationUpdates()
+            drainer.stopBluetoothScanning()
+            drainer.stopAudioTone()
+            drainer.stopAudioRecording()
+            drainer.stopHaptics()
+            drainer.stopNetworkRequests()
+            drainer.stopUploadRequests()
+            drainer.stopCameraCapture()
+            drainer.stop4KRecording()
+            drainer.stopStorageIO()
+            drainer.stopCryptoHashing()
+            drainer.stopMotionUpdates()
+
+            brightnessEnabled = false
+            cpuLoadEnabled = false
+            locationEnabled = false
+            bluetoothEnabled = false
+            audioToneEnabled = false
+            hapticsEnabled = false
+            networkEnabled = false
+            uploadEnabled = false
+            cameraEnabled = false
+            gpuComputeEnabled = false
+            particleAnimationEnabled = false
+            arSessionEnabled = false
+            imageDisplayEnabled = false
+            audioRecordingEnabled = false
+            storageIOEnabled = false
+            cryptoHashingEnabled = false
+            motionUpdatesEnabled = false
+            record4KEnabled = false
+            aggressiveModeEnabled = false
+            
+            // Ensure audio session is properly deactivated
+            try? AVAudioSession.sharedInstance().setActive(false)
         }
     }
 }
