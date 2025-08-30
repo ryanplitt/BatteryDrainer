@@ -1,5 +1,6 @@
 import SwiftUI
 import ARKit
+import SceneKit
 
 
 // MARK: - ARDrainerView
@@ -58,7 +59,6 @@ struct ARDrainerView: UIViewRepresentable {
         scene.rootNode.addChildNode(particleNode)
         
         // Dramatically increase object count from 200 to 1200 for maximum stress
-        for i in 0..<1200 {
         for i in 0..<1200 {
             // Use more complex geometries for increased GPU load
             let geometry: SCNGeometry

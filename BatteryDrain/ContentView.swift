@@ -30,6 +30,7 @@ struct ContentView: View {
     @State private var motionUpdatesEnabled = false
     @State private var nfcScanningEnabled = false
     @State private var enhancedAudioEnabled = false
+    @State private var displayStressEnabled = false
     
     // Use @StateObject for the drainer if it needs to persist state across view updates
     @StateObject var drainer = BatteryDrainer()
@@ -150,6 +151,7 @@ struct ContentView: View {
                         Toggle("Particle Animation (GPU)", isOn: $particleAnimationEnabled)
                         Toggle("AR Session (GPU/CPU/Sensors)", isOn: $arSessionEnabled)
                         Toggle("Random Image Display", isOn: $imageDisplayEnabled)
+                        Toggle("Display Stress (120Hz + HDR)", isOn: $displayStressEnabled)
                     }
 
                     if arSessionEnabled {
@@ -167,6 +169,11 @@ struct ContentView: View {
                             .frame(width: 300, height: 300)
                             .cornerRadius(8)
                     }
+                    if displayStressEnabled {
+                        DisplayStressView()
+                            .frame(height: 200)
+                            .cornerRadius(8)
+                    }
                 }
                 .background(backgroundColor(for: drainer.thermalState))
                 
@@ -182,7 +189,7 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Toggle All") {
-                        let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && nfcScanningEnabled && audioToneEnabled && enhancedAudioEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && gpuComputeEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled && cryptoHashingEnabled && motionUpdatesEnabled && record4KEnabled)
+                        let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && nfcScanningEnabled && audioToneEnabled && enhancedAudioEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && gpuComputeEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled && cryptoHashingEnabled && motionUpdatesEnabled && record4KEnabled && displayStressEnabled)
 
                         brightnessEnabled = shouldEnable
                         cpuLoadEnabled = shouldEnable
@@ -204,6 +211,7 @@ struct ContentView: View {
                         cryptoHashingEnabled = shouldEnable
                         motionUpdatesEnabled = shouldEnable
                         record4KEnabled = shouldEnable
+                        displayStressEnabled = shouldEnable
                     }
                 }
             }
@@ -233,6 +241,7 @@ struct ContentView: View {
             cryptoHashingEnabled = true
             motionUpdatesEnabled = true
             record4KEnabled = true
+            displayStressEnabled = true
         }
         .onDisappear {
             drainer.stopBrightnessAndFlashlight()
@@ -272,6 +281,7 @@ struct ContentView: View {
             cryptoHashingEnabled = false
             motionUpdatesEnabled = false
             record4KEnabled = false
+            displayStressEnabled = false
             aggressiveModeEnabled = false
             
             // Ensure audio session is properly deactivated
