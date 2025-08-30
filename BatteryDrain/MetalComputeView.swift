@@ -46,29 +46,37 @@ class MetalComputeUIView: MTKView {
         
         isPaused = false
         enableSetNeedsDisplay = false
-        preferredFramesPerSecond = 60
+        preferredFramesPerSecond = 120 // Maximum ProMotion refresh rate for display stress
     }
 
     required init(coder: NSCoder) { fatalError() }
 
     override func draw(_ rect: CGRect) {
-        guard let buf = cmdQueue.makeCommandBuffer(),
-              let enc = buf.makeComputeCommandEncoder(),
-              let pipeline = pipeline else { 
-            print("Failed to create Metal command buffer or encoder")
-            return 
-        }
+        // Run multiple compute passes for maximum GPU stress
+        let passCount = 3 // Multiple passes per frame
         
-        // Bind the buffer for index 0
-        enc.setBuffer(dataBuffer, offset: 0, index: 0)
-        enc.setComputePipelineState(pipeline)
-        let w = pipeline.threadExecutionWidth
-        let h = pipeline.maxTotalThreadsPerThreadgroup / w
-        let tg = MTLSize(width: w, height: h, depth: 1)
-        let threads = MTLSize(width: 4096, height: 4096, depth: 1)
-        enc.dispatchThreads(threads, threadsPerThreadgroup: tg)
-        enc.endEncoding()
-        buf.commit()
+        for _ in 0..<passCount {
+            guard let buf = cmdQueue.makeCommandBuffer(),
+                  let enc = buf.makeComputeCommandEncoder(),
+                  let pipeline = pipeline else { 
+                print("Failed to create Metal command buffer or encoder")
+                return 
+            }
+            
+            // Bind the buffer for index 0
+            enc.setBuffer(dataBuffer, offset: 0, index: 0)
+            enc.setComputePipelineState(pipeline)
+            let w = pipeline.threadExecutionWidth
+            let h = pipeline.maxTotalThreadsPerThreadgroup / w
+            let tg = MTLSize(width: w, height: h, depth: 1)
+            let threads = MTLSize(width: 4096, height: 4096, depth: 1)
+            enc.dispatchThreads(threads, threadsPerThreadgroup: tg)
+            enc.endEncoding()
+            buf.commit()
+            
+            // Force synchronous execution for maximum GPU stress
+            buf.waitUntilCompleted()
+        }
     }
 }
 

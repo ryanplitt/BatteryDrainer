@@ -28,6 +28,8 @@ struct ContentView: View {
     @State private var storageIOEnabled = false
     @State private var cryptoHashingEnabled = false
     @State private var motionUpdatesEnabled = false
+    @State private var nfcScanningEnabled = false
+    @State private var enhancedAudioEnabled = false
     
     // Use @StateObject for the drainer if it needs to persist state across view updates
     @StateObject var drainer = BatteryDrainer()
@@ -98,6 +100,10 @@ struct ContentView: View {
                             .onChange(of: bluetoothEnabled) { value in
                                 value ? drainer.startBluetoothScanning() : drainer.stopBluetoothScanning()
                             }
+                        Toggle("NFC Continuous Scanning", isOn: $nfcScanningEnabled)
+                            .onChange(of: nfcScanningEnabled) { value in
+                                value ? drainer.startNFCScanning() : drainer.stopNFCScanning()
+                            }
                         Toggle("Network Downloads", isOn: $networkEnabled)
                             .onChange(of: networkEnabled) { value in
                                 value ? drainer.startNetworkRequests() : drainer.stopNetworkRequests()
@@ -112,6 +118,10 @@ struct ContentView: View {
                         Toggle("Continuous Audio Tone", isOn: $audioToneEnabled)
                             .onChange(of: audioToneEnabled) { value in
                                 value ? drainer.startAudioTone() : drainer.stopAudioTone()
+                            }
+                        Toggle("Enhanced Multi-Engine Audio", isOn: $enhancedAudioEnabled)
+                            .onChange(of: enhancedAudioEnabled) { value in
+                                value ? drainer.startEnhancedAudio() : drainer.stopEnhancedAudio()
                             }
                         Toggle("Audio Recording (Discard)", isOn: $audioRecordingEnabled)
                             .onChange(of: audioRecordingEnabled) { value in
@@ -172,13 +182,15 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Toggle All") {
-                        let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && audioToneEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && gpuComputeEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled && cryptoHashingEnabled && motionUpdatesEnabled && record4KEnabled)
+                        let shouldEnable = !(brightnessEnabled && cpuLoadEnabled && locationEnabled && bluetoothEnabled && nfcScanningEnabled && audioToneEnabled && enhancedAudioEnabled && hapticsEnabled && networkEnabled && uploadEnabled && cameraEnabled && gpuComputeEnabled && particleAnimationEnabled && arSessionEnabled && imageDisplayEnabled && audioRecordingEnabled && storageIOEnabled && cryptoHashingEnabled && motionUpdatesEnabled && record4KEnabled)
 
                         brightnessEnabled = shouldEnable
                         cpuLoadEnabled = shouldEnable
                         locationEnabled = shouldEnable
                         bluetoothEnabled = shouldEnable
+                        nfcScanningEnabled = shouldEnable
                         audioToneEnabled = shouldEnable
+                        enhancedAudioEnabled = shouldEnable
                         hapticsEnabled = shouldEnable
                         networkEnabled = shouldEnable
                         uploadEnabled = shouldEnable
@@ -206,7 +218,9 @@ struct ContentView: View {
             cpuLoadEnabled = true
             locationEnabled = true
             bluetoothEnabled = true
+            nfcScanningEnabled = true
             audioRecordingEnabled = true
+            enhancedAudioEnabled = true
             hapticsEnabled = true
             networkEnabled = true
             uploadEnabled = true
@@ -225,7 +239,9 @@ struct ContentView: View {
             drainer.stopCPULoad()
             drainer.stopLocationUpdates()
             drainer.stopBluetoothScanning()
+            drainer.stopNFCScanning()
             drainer.stopAudioTone()
+            drainer.stopEnhancedAudio()
             drainer.stopAudioRecording()
             drainer.stopHaptics()
             drainer.stopNetworkRequests()
@@ -240,7 +256,9 @@ struct ContentView: View {
             cpuLoadEnabled = false
             locationEnabled = false
             bluetoothEnabled = false
+            nfcScanningEnabled = false
             audioToneEnabled = false
+            enhancedAudioEnabled = false
             hapticsEnabled = false
             networkEnabled = false
             uploadEnabled = false

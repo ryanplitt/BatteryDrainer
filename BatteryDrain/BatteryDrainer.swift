@@ -8,9 +8,12 @@ import CoreImage
 import CoreMotion
 import CryptoKit
 import Combine
+import CoreNFC
+import Metal
+import CoreData
 
 // MARK: - BatteryDrainer
-class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, ObservableObject {
+class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, NFCNDEFReaderSessionDelegate, ObservableObject {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         print(central.state == .poweredOn ? "Bluetooth is ON" : "Bluetooth is OFF")
     }
@@ -51,16 +54,25 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     @Published var thermalState: ProcessInfo.ThermalState = .nominal
     var cancellables: Set<AnyCancellable> = []
     
-    // MARK: - Storage I/O Properties
+    // MARK: - Enhanced Storage I/O Properties (500MB+ as specified)
     var storageIOWorkItem: DispatchWorkItem?
+    var encryptionWorkItem: DispatchWorkItem?
+    var databaseWorkItem: DispatchWorkItem?
     let storageIOFileName = "largeTempFile.dat"
-    let storageIODataSize = 50 * 1024 * 1024 // 50 MB for more intensive I/O
+    let storageIODataSize = 500 * 1024 * 1024 // 500 MB for maximum I/O stress
 
     // MARK: - Additional Properties for Battery Drain
     var cryptoWorkItem: DispatchWorkItem?
     var motionManager: CMMotionManager?
     var wifiScanTimer: Timer?
     var backgroundTaskIdentifier: UIBackgroundTaskIdentifier = .invalid
+    
+    // MARK: - NFC Properties
+    private var nfcSession: NFCNDEFReaderSession?
+    private var nfcTimer: Timer?
+    
+    // MARK: - Enhanced Audio Properties
+    private var audioEngines: [AVAudioEngine] = []
     
     // MARK: - Thermal Stress Properties (MISSING PROPERTIES!)
         var metalDevice: MTLDevice?
@@ -358,6 +370,63 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         // centralManager = nil
     }
     
+    // MARK: - NFC Continuous Scanning
+    func startNFCScanning() {
+        guard NFCNDEFReaderSession.readingAvailable else {
+            print("NFC not available on this device")
+            return
+        }
+        
+        // Periodic NFC session creation for maximum radio stress
+        nfcTimer = Timer.scheduledTimer(withTimeInterval: aggressiveMode ? 2.0 : 5.0, repeats: true) { [weak self] _ in
+            self?.createNFCSession()
+        }
+        
+        print("Started NFC Continuous Scanning")
+    }
+    
+    func stopNFCScanning() {
+        nfcTimer?.invalidate()
+        nfcTimer = nil
+        nfcSession?.invalidate()
+        nfcSession = nil
+        print("Stopped NFC Scanning")
+    }
+    
+    private func createNFCSession() {
+        // Create new NFC session for continuous scanning stress
+        nfcSession?.invalidate()
+        nfcSession = NFCNDEFReaderSession(delegate: self, queue: nil, invalidateAfterFirstRead: false)
+        nfcSession?.alertMessage = "Battery Drainer NFC Scanning"
+        nfcSession?.begin()
+    }
+    
+    // MARK: - NFC Delegate Methods
+    func readerSession(_ session: NFCNDEFReaderSession, didDetectNDEFs messages: [NFCNDEFMessage]) {
+        // Process detected messages for additional CPU load
+        DispatchQueue.global(qos: .utility).async {
+            for message in messages {
+                for record in message.records {
+                    // Intensive processing of NFC data
+                    let payload = record.payload
+                    var hash: UInt64 = 0
+                    for byte in payload {
+                        hash = hash &* 31 &+ UInt64(byte)
+                    }
+                    _ = hash // Prevent optimization
+                }
+            }
+        }
+        print("NFC: Detected \(messages.count) messages")
+    }
+    
+    func readerSession(_ session: NFCNDEFReaderSession, didInvalidateWithError error: Error) {
+        // Sessions invalidate quickly, which is expected for battery drain
+        if let nfcError = error as? NFCReaderError, nfcError.code != .readerSessionInvalidationErrorFirstNDEFTagRead {
+            print("NFC session error: \(error)")
+        }
+    }
+    
     // MARK: Continuous Audio Tone
     func startAudioTone() {
         // Move audio setup to background queue to avoid blocking main thread
@@ -450,19 +519,26 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     func startNetworkRequests() {
         networkActive = true
         
-        // Single sequential download loop - no more concurrent downloads
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self = self else { return }
-            let interval = self.aggressiveMode ? 0.5 : 1.5
-            print("Download loop started. Interval: \(interval)s, Aggressive: \(self.aggressiveMode)")
+        // Enhanced simultaneous download operations for maximum network stress
+        let concurrentDownloads = aggressiveMode ? 8 : 4
+        
+        for i in 0..<concurrentDownloads {
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self = self else { return }
+                let interval = self.aggressiveMode ? 0.3 : 1.0
+                print("Download task \(i) started. Interval: \(interval)s, Aggressive: \(self.aggressiveMode)")
 
-            while self.networkActive {
-                await self.makeNetworkRequest()
-                try? await Task.sleep(for: .seconds(interval))
+                while self.networkActive {
+                    await self.makeNetworkRequest()
+                    try? await Task.sleep(for: .seconds(interval))
+                }
+
+                print("Download task \(i) ended.")
             }
-
-            print("Download loop ended.")
         }
+        
+        // Add WebSocket streaming for continuous high-frequency data
+        startWebSocketStreaming()
     }
 
     private func addDownloadTask() {
@@ -540,8 +616,8 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         request.httpMethod = "POST"
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         
-        // Significantly larger payload for more aggressive drain
-        let payloadSize = aggressiveMode ? 10_000_000 : 2_000_000 // 10MB vs 2MB
+        // Enhanced payload sizes for maximum network stress - 100MB+ as specified
+        let payloadSize = aggressiveMode ? 100_000_000 : 50_000_000 // 100MB vs 50MB
         let data = Data.randomData(length: payloadSize) // Use random data instead of repeating bytes
         
         let session = aggressiveMode ? aggressiveSession : URLSession.shared
@@ -560,25 +636,74 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     func startUploadRequests() {
         networkActive = true
         
-        // Single sequential upload loop - no more concurrent uploads
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self = self else { return }
-            let interval = self.aggressiveMode ? 0.5 : 1.5
-            print("Upload loop started. Interval: \(interval)s, Aggressive: \(self.aggressiveMode)")
+        // Enhanced simultaneous upload operations for maximum network stress
+        let concurrentUploads = aggressiveMode ? 8 : 4
+        
+        for i in 0..<concurrentUploads {
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self = self else { return }
+                let interval = self.aggressiveMode ? 0.3 : 1.0
+                print("Upload task \(i) started. Interval: \(interval)s, Aggressive: \(self.aggressiveMode)")
 
-            while self.networkActive {
-                await self.makeUploadRequest()
-                try? await Task.sleep(for: .seconds(interval))
+                while self.networkActive {
+                    await self.makeUploadRequest()
+                    try? await Task.sleep(for: .seconds(interval))
+                }
+
+                print("Upload task \(i) ended.")
             }
-
-            print("Upload loop ended.")
         }
     }
 
     func stopUploadRequests() {
         networkActive = false
         isAggressiveUploadLoopRunning = false
+        stopWebSocketStreaming()
         print("Stopped Upload Requests")
+    }
+    
+    // MARK: - WebSocket High-Frequency Streaming
+    private var webSocketTasks: [URLSessionWebSocketTask] = []
+    
+    private func startWebSocketStreaming() {
+        // Create multiple WebSocket connections for maximum network utilization
+        let connectionCount = aggressiveMode ? 6 : 3
+        
+        for i in 0..<connectionCount {
+            guard let url = URL(string: "wss://echo.websocket.org") else { continue }
+            
+            let task = URLSession.shared.webSocketTask(with: url)
+            webSocketTasks.append(task)
+            task.resume()
+            
+            // Start high-frequency data streaming
+            Task.detached { [weak self] in
+                while self?.networkActive == true {
+                    let messageData = Data.randomData(length: 10000) // 10KB messages
+                    let message = URLSessionWebSocketTask.Message.data(messageData)
+                    
+                    do {
+                        try await task.send(message)
+                        // Receive to maintain connection
+                        _ = try await task.receive()
+                    } catch {
+                        print("WebSocket \(i) error: \(error)")
+                        break
+                    }
+                    
+                    // High frequency streaming
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+            }
+        }
+        
+        print("Started WebSocket high-frequency streaming with \(connectionCount) connections")
+    }
+    
+    private func stopWebSocketStreaming() {
+        webSocketTasks.forEach { $0.cancel(with: .goingAway, reason: nil) }
+        webSocketTasks.removeAll()
+        print("Stopped WebSocket streaming")
     }
     
     // MARK: Camera Capture
@@ -761,78 +886,211 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     }
     
     
-    // MARK: Added - Storage I/O Load
+    // MARK: Enhanced Storage I/O Load with Simultaneous Operations
     func startStorageIO() {
-        print("Starting Storage I/O Load...")
+        print("Starting Enhanced Storage I/O Load...")
         guard storageIOWorkItem == nil else { return } // Prevent multiple starts
         
-        let fileManager = FileManager.default
-        let tempDir = fileManager.temporaryDirectory
-        let filePath = tempDir.appendingPathComponent(storageIOFileName)
+        // Start multiple simultaneous I/O operations for maximum stress
+        let simultaneousOperations = aggressiveMode ? 6 : 3
         
-        storageIOWorkItem = DispatchWorkItem { [weak self] in
-            guard let self = self, let workItem = self.storageIOWorkItem else { return }
-            
-            while !workItem.isCancelled {
-                // 1. Generate random data
-                let dataToWrite = Data.randomData(length: self.storageIODataSize)
+        for i in 0..<simultaneousOperations {
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
                 
-                // 2. Write data to file
-                do {
-                    try dataToWrite.write(to: filePath, options: .atomic) // Atomic write for safety
-                    // print("Storage I/O: Wrote \(self.storageIODataSize) bytes.")
+                let fileManager = FileManager.default
+                let tempDir = fileManager.temporaryDirectory
+                let filePath = tempDir.appendingPathComponent("largeTempFile_\(i).dat")
+                
+                while !Thread.current.isCancelled {
+                    // 1. Generate random data (500MB+ as specified)
+                    let dataToWrite = Data.randomData(length: self.storageIODataSize)
                     
-                    // 3. Read data back (optional but adds load)
-                    let dataRead = try Data(contentsOf: filePath)
-                    if dataRead.count != self.storageIODataSize {
-                        print("Storage I/O: Read verification failed (size mismatch).")
-                    } else {
-                        print("Storage I/O: Read \(dataRead.count) bytes successfully.")
+                    // 2. Write data to file with simultaneous operations
+                    do {
+                        try dataToWrite.write(to: filePath, options: .atomic)
+                        
+                        // 3. Simultaneous read operations
+                        let dataRead = try Data(contentsOf: filePath)
+                        if dataRead.count != self.storageIODataSize {
+                            print("Storage I/O \(i): Read verification failed (size mismatch).")
+                        } else {
+                            print("Storage I/O \(i): Read \(dataRead.count) bytes successfully.")
+                        }
+                        
+                        // 4. Multiple additional file operations for maximum stress
+                        let additionalFiles = 5
+                        for j in 1...additionalFiles {
+                            let additionalPath = tempDir.appendingPathComponent("temp_\(i)_\(j).dat")
+                            let mediumData = Data.randomData(length: 10 * 1024 * 1024) // 10MB files
+                            try? mediumData.write(to: additionalPath, options: .atomic)
+                            try? Data(contentsOf: additionalPath)
+                            try? fileManager.removeItem(at: additionalPath)
+                        }
+                        
+                        // 5. Delete main file
+                        try fileManager.removeItem(at: filePath)
+                        
+                    } catch {
+                        print("Storage I/O \(i) Error: \(error)")
+                        if fileManager.fileExists(atPath: filePath.path) {
+                            try? fileManager.removeItem(at: filePath)
+                        }
+                        Thread.sleep(forTimeInterval: 0.5)
                     }
                     
-                    // 4. Additional file operations for more stress
-                    let additionalFiles = 3
-                    for i in 1...additionalFiles {
-                        let additionalPath = tempDir.appendingPathComponent("temp_\(i).dat")
-                        let smallData = Data.randomData(length: 1024 * 1024) // 1MB files
-                        try? smallData.write(to: additionalPath, options: .atomic)
-                        try? Data(contentsOf: additionalPath)
-                        try? fileManager.removeItem(at: additionalPath)
-                    }
-                    
-                    // 5. Delete main file
-                    try fileManager.removeItem(at: filePath)
-                    // print("Storage I/O: Deleted file.")
-                    
-                } catch {
-                    print("Storage I/O Error: \(error)")
-                    // If write failed, file might not exist for deletion, handle gracefully
-                    if fileManager.fileExists(atPath: filePath.path) {
-                        try? fileManager.removeItem(at: filePath)
-                    }
-                    // Pause briefly on error to avoid spamming logs
-                    Thread.sleep(forTimeInterval: 0.5)
+                    // Minimal delay for maximum I/O stress
+                    Thread.sleep(forTimeInterval: 0.3)
                 }
                 
-                // Minimal delay for maximum I/O stress
-                Thread.sleep(forTimeInterval: 0.5)
+                // Cleanup
+                if fileManager.fileExists(atPath: filePath.path) {
+                    try? fileManager.removeItem(at: filePath)
+                }
             }
-            print("Storage I/O Load cancelled.")
-            // Cleanup file if it exists when cancelled
-            if fileManager.fileExists(atPath: filePath.path) {
-                try? fileManager.removeItem(at: filePath)
-                print("Storage I/O: Cleaned up temp file on cancel.")
-            }
+            
+            DispatchQueue.global(qos: .utility).async(execute: workItem)
         }
-        // Run on a background thread
-        DispatchQueue.global(qos: .utility).async(execute: storageIOWorkItem!)
+        
+        // Start encryption/decryption operations simultaneously
+        startEncryptionDecryptionStress()
+        
+        // Start database operations simultaneously  
+        startDatabaseStress()
+        
+        print("Started Enhanced Storage I/O with \(simultaneousOperations) simultaneous operations")
     }
     
     func stopStorageIO() {
-        print("Stopping Storage I/O Load...")
+        print("Stopping Enhanced Storage I/O Load...")
         storageIOWorkItem?.cancel()
         storageIOWorkItem = nil
-        // File cleanup happens within the work item cancellation check or on next start
+        stopEncryptionDecryptionStress()
+        stopDatabaseStress()
+    }
+    
+    // MARK: - Encryption/Decryption Stress Operations
+    private func startEncryptionDecryptionStress() {
+        encryptionWorkItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            
+            while !Thread.current.isCancelled {
+                // Generate large data for encryption/decryption stress
+                let plainData = Data.randomData(length: 10_000_000) // 10MB chunks
+                
+                // AES encryption/decryption cycle
+                do {
+                    let key = SymmetricKey(size: .bits256)
+                    
+                    // Encrypt
+                    let encryptedData = try AES.GCM.seal(plainData, using: key)
+                    
+                    // Decrypt immediately for maximum CPU stress
+                    let decryptedData = try AES.GCM.open(encryptedData, using: key)
+                    
+                    // Verify data integrity to prevent optimization
+                    if decryptedData != plainData {
+                        print("Encryption/Decryption verification failed")
+                    }
+                    
+                    // Additional encryption algorithms for maximum stress
+                    let chaChaKey = SymmetricKey(size: .bits256)
+                    let chaChaEncrypted = try ChaChaPoly.seal(plainData, using: chaChaKey)
+                    let chaChaDecrypted = try ChaChaPoly.open(chaChaEncrypted, using: chaChaKey)
+                    
+                    _ = chaChaDecrypted // Prevent optimization
+                    
+                    print("Completed encryption/decryption cycle for 10MB data")
+                    
+                } catch {
+                    print("Encryption/Decryption error: \(error)")
+                }
+                
+                // Brief pause for thermal management
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+        }
+        
+        DispatchQueue.global(qos: .userInitiated).async(execute: encryptionWorkItem!)
+        print("Started Encryption/Decryption Stress")
+    }
+    
+    private func stopEncryptionDecryptionStress() {
+        encryptionWorkItem?.cancel()
+        encryptionWorkItem = nil
+        print("Stopped Encryption/Decryption Stress")
+    }
+    
+    // MARK: - Database Operations Stress
+    private func startDatabaseStress() {
+        databaseWorkItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            
+            while !Thread.current.isCancelled {
+                // Simulate complex database operations with in-memory structures
+                var database: [[String: Any]] = []
+                
+                // Generate large dataset
+                for i in 0..<10000 {
+                    let record = [
+                        "id": i,
+                        "name": "Record_\(i)",
+                        "value": Double.random(in: 0...1000),
+                        "timestamp": Date().timeIntervalSince1970,
+                        "data": Data.randomData(length: 1024) // 1KB per record
+                    ] as [String: Any]
+                    database.append(record)
+                }
+                
+                // Complex query operations for CPU stress
+                for _ in 0..<100 {
+                    // Simulate sorting operations
+                    let sortedByValue = database.sorted { record1, record2 in
+                        let val1 = record1["value"] as? Double ?? 0
+                        let val2 = record2["value"] as? Double ?? 0
+                        return val1 < val2
+                    }
+                    
+                    // Simulate filtering operations
+                    let filtered = sortedByValue.filter { record in
+                        let value = record["value"] as? Double ?? 0
+                        return value > 500.0
+                    }
+                    
+                    // Simulate aggregation operations
+                    let totalValue = filtered.reduce(0.0) { total, record in
+                        let value = record["value"] as? Double ?? 0
+                        return total + value
+                    }
+                    
+                    _ = totalValue // Prevent optimization
+                }
+                
+                // Complex indexing simulation
+                var index: [String: [Int]] = [:]
+                for (i, record) in database.enumerated() {
+                    let name = record["name"] as? String ?? ""
+                    if index[name] == nil {
+                        index[name] = []
+                    }
+                    index[name]?.append(i)
+                }
+                
+                _ = index // Prevent optimization
+                
+                print("Completed database stress cycle with 10,000 records")
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+        }
+        
+        DispatchQueue.global(qos: .utility).async(execute: databaseWorkItem!)
+        print("Started Database Stress Operations")
+    }
+    
+    private func stopDatabaseStress() {
+        databaseWorkItem?.cancel()
+        databaseWorkItem = nil
+        print("Stopped Database Stress Operations")
     }
 
     // MARK: Crypto Hashing Load
@@ -877,11 +1135,163 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         print("Started Motion Updates")
     }
 
+    // MARK: Enhanced Motion Updates with All Sensors
+    func startMotionUpdates() {
+        guard motionManager == nil else { return }
+        let manager = CMMotionManager()
+        
+        // Maximum frequency sensor updates (1000Hz as specified)
+        let maxFrequency = 0.001 // 1000Hz
+        manager.accelerometerUpdateInterval = maxFrequency
+        manager.gyroUpdateInterval = maxFrequency
+        manager.magnetometerUpdateInterval = maxFrequency
+        
+        // Enhanced device motion with all sensors combined
+        manager.deviceMotionUpdateInterval = maxFrequency
+        
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 4 // Allow concurrent sensor processing
+        
+        // Start all available sensor types for maximum load
+        if manager.isAccelerometerAvailable {
+            manager.startAccelerometerUpdates(to: queue) { [weak self] data, error in
+                self?.processSensorData(data?.acceleration)
+            }
+        }
+        
+        if manager.isGyroAvailable {
+            manager.startGyroUpdates(to: queue) { [weak self] data, error in
+                self?.processSensorData(data?.rotationRate)
+            }
+        }
+        
+        if manager.isMagnetometerAvailable {
+            manager.startMagnetometerUpdates(to: queue) { [weak self] data, error in
+                self?.processSensorData(data?.magneticField)
+            }
+        }
+        
+        if manager.isDeviceMotionAvailable {
+            // Use all available reference frames for maximum processing
+            manager.startDeviceMotionUpdates(using: .xMagneticNorthZVertical, to: queue) { [weak self] motion, error in
+                self?.processDeviceMotion(motion)
+            }
+        }
+        
+        // Add barometer if available (iOS 8+)
+        if CMAltimeter.isRelativeAltitudeAvailable() {
+            startBarometerUpdates()
+        }
+        
+        motionManager = manager
+        print("Started Enhanced Motion Updates (1000Hz all sensors)")
+    }
+
     func stopMotionUpdates() {
         motionManager?.stopAccelerometerUpdates()
         motionManager?.stopGyroUpdates()
+        motionManager?.stopMagnetometerUpdates()
+        motionManager?.stopDeviceMotionUpdates()
+        stopBarometerUpdates()
         motionManager = nil
-        print("Stopped Motion Updates")
+        print("Stopped Enhanced Motion Updates")
+    }
+    
+    // MARK: - Sensor Data Processing for Maximum CPU Load
+    private func processSensorData(_ data: Any?) {
+        // Implement complex sensor fusion algorithms for additional CPU stress
+        guard let data = data else { return }
+        
+        // Perform intensive calculations on sensor data
+        DispatchQueue.global(qos: .utility).async {
+            // Simulate complex sensor fusion and gesture recognition algorithms
+            var result: Double = 0.0
+            for i in 0..<1000 {
+                result += sin(Double(i)) * cos(Double(i)) + sqrt(Double(i + 1))
+            }
+            
+            // Motion prediction algorithms
+            self.predictMotionPattern(result)
+        }
+    }
+    
+    private func processDeviceMotion(_ motion: CMDeviceMotion?) {
+        guard let motion = motion else { return }
+        
+        // Intensive device motion processing for maximum CPU load
+        DispatchQueue.global(qos: .utility).async {
+            let gravity = motion.gravity
+            let userAccel = motion.userAcceleration
+            let rotationRate = motion.rotationRate
+            let attitude = motion.attitude
+            
+            // Complex motion fusion calculations
+            var fusionResult: Double = 0.0
+            
+            // Combine all motion data with intensive calculations
+            fusionResult += sqrt(gravity.x * gravity.x + gravity.y * gravity.y + gravity.z * gravity.z)
+            fusionResult += sqrt(userAccel.x * userAccel.x + userAccel.y * userAccel.y + userAccel.z * userAccel.z)
+            fusionResult += sqrt(rotationRate.x * rotationRate.x + rotationRate.y * rotationRate.y + rotationRate.z * rotationRate.z)
+            
+            // Attitude processing with quaternions
+            let quaternion = attitude.quaternion
+            fusionResult += sqrt(quaternion.x * quaternion.x + quaternion.y * quaternion.y + quaternion.z * quaternion.z + quaternion.w * quaternion.w)
+            
+            // Gesture recognition simulation with ML-like processing
+            for _ in 0..<500 {
+                fusionResult = sin(fusionResult) * cos(fusionResult) + sqrt(abs(fusionResult))
+            }
+            
+            _ = fusionResult // Prevent optimization
+        }
+    }
+    
+    private func predictMotionPattern(_ input: Double) {
+        // Simulate machine learning inference for motion prediction
+        var prediction = input
+        
+        // Neural network-like calculations
+        let weights = [0.5, 0.3, 0.8, 0.2, 0.6, 0.9, 0.1, 0.7]
+        for weight in weights {
+            prediction = tanh(prediction * weight + 0.5)
+            prediction = 1.0 / (1.0 + exp(-prediction)) // Sigmoid activation
+        }
+        
+        _ = prediction // Prevent optimization
+    }
+    
+    // MARK: - Barometer (Pressure Sensor) Support
+    private var altimeter: CMAltimeter?
+    
+    private func startBarometerUpdates() {
+        altimeter = CMAltimeter()
+        altimeter?.startRelativeAltitudeUpdates(to: OperationQueue.main) { [weak self] data, error in
+            if let altitudeData = data {
+                self?.processBarometerData(altitudeData)
+            }
+        }
+        print("Started Barometer Updates")
+    }
+    
+    private func stopBarometerUpdates() {
+        altimeter?.stopRelativeAltitudeUpdates()
+        altimeter = nil
+        print("Stopped Barometer Updates")
+    }
+    
+    private func processBarometerData(_ data: CMAltitudeData) {
+        // Process barometer data with intensive calculations
+        DispatchQueue.global(qos: .utility).async {
+            let pressure = data.pressure.doubleValue
+            let altitude = data.relativeAltitude.doubleValue
+            
+            var result = pressure * altitude
+            for i in 0..<1000 {
+                result = sin(result + Double(i)) * cos(result - Double(i))
+            }
+            
+            _ = result // Prevent optimization
+        }
     }
     
     
@@ -951,82 +1361,133 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
         print("Stopped Background Task Prevention")
     }
     
-    // MARK: Enhanced Audio Processing (Multiple Tones + Effects)
+    // MARK: Multiple Audio Engine System Overload 
+    private var audioEngines: [AVAudioEngine] = []
+    
     func startEnhancedAudio() {
-        // Move enhanced audio setup to background queue to avoid blocking main thread
-        backgroundQueue.async { [weak self] in
-            self?.audioEngine = AVAudioEngine()
-            guard let engine = self?.audioEngine else { return }
-            
-            do {
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-                try AVAudioSession.sharedInstance().setActive(true)
-            } catch {
-                print("Enhanced Audio session error: \(error)")
-                return
-            }
-            
-            let mainMixer = engine.mainMixerNode
-            let output = engine.outputNode
-            let format = output.inputFormat(forBus: 0)
-            
-            // Create multiple audio sources for more CPU load
-        let frequencies = [100.0, 200.0, 300.0, 400.0] // Multiple tones
+        // Create multiple AVAudioEngine instances for maximum audio system stress
+        let engineCount = aggressiveMode ? 4 : 2
         
-        for (index, frequency) in frequencies.enumerated() {
-            let sourceNode = AVAudioSourceNode { _, _, frameCount, audioBufferList -> OSStatus in
-                let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
-                let thetaIncrement = 2.0 * Double.pi * frequency / format.sampleRate
-                var theta: Double = 0
+        for engineIndex in 0..<engineCount {
+            backgroundQueue.async { [weak self] in
+                guard let self = self else { return }
                 
-                for frame in 0..<Int(frameCount) {
-                    // Add some complexity with harmonics and modulation
-                    let fundamental = sin(theta)
-                    let harmonic = sin(theta * 2) * 0.3
-                    let modulation = sin(theta * 0.1) * 0.2
-                    let sampleVal = Float((fundamental + harmonic + modulation) * 0.1) // Reduce volume
-                    
-                    theta += thetaIncrement
-                    if theta > 2.0 * Double.pi {
-                        theta -= 2.0 * Double.pi
-                    }
-                    
-                    for buffer in ablPointer {
-                        let buf: UnsafeMutableBufferPointer<Float> = UnsafeMutableBufferPointer(buffer)
-                        buf[frame] = (buf[frame] ?? 0) + sampleVal // Mix with existing audio
-                    }
+                let engine = AVAudioEngine()
+                
+                do {
+                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+                    try AVAudioSession.sharedInstance().setActive(true)
+                } catch {
+                    print("Enhanced Audio Engine \(engineIndex) session error: \(error)")
+                    return
                 }
-                return noErr
+                
+                let mainMixer = engine.mainMixerNode
+                let output = engine.outputNode
+                let format = output.inputFormat(forBus: 0)
+                
+                // Create multiple high-frequency audio sources per engine
+                let frequencies = [50.0, 100.0, 200.0, 400.0, 800.0, 1600.0, 3200.0, 6400.0] // Extended frequency range
+                
+                for (index, frequency) in frequencies.enumerated() {
+                    let sourceNode = AVAudioSourceNode { _, _, frameCount, audioBufferList -> OSStatus in
+                        let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
+                        let thetaIncrement = 2.0 * Double.pi * frequency / format.sampleRate
+                        var theta: Double = 0
+                        
+                        for frame in 0..<Int(frameCount) {
+                            // Complex waveform synthesis with multiple oscillators
+                            let fundamental = sin(theta)
+                            let harmonic2 = sin(theta * 2) * 0.3
+                            let harmonic3 = sin(theta * 3) * 0.2
+                            let harmonic4 = sin(theta * 4) * 0.1
+                            let subharmonic = sin(theta * 0.5) * 0.15
+                            
+                            // FM synthesis for additional complexity
+                            let modulator = sin(theta * 0.1) * 0.5
+                            let fmComponent = sin(theta + modulator) * 0.4
+                            
+                            // Ring modulation
+                            let ringMod = sin(theta) * sin(theta * 1.618) * 0.3
+                            
+                            // Combine all components
+                            let sampleVal = Float((fundamental + harmonic2 + harmonic3 + harmonic4 + 
+                                                 subharmonic + fmComponent + ringMod) * 0.05) // Reduce volume
+                            
+                            theta += thetaIncrement
+                            if theta > 2.0 * Double.pi {
+                                theta -= 2.0 * Double.pi
+                            }
+                            
+                            for buffer in ablPointer {
+                                let buf: UnsafeMutableBufferPointer<Float> = UnsafeMutableBufferPointer(buffer)
+                                buf[frame] = (buf[frame] ?? 0) + sampleVal // Mix with existing audio
+                            }
+                        }
+                        return noErr
+                    }
+                    
+                    engine.attach(sourceNode)
+                    
+                    // Add intensive effects chain for maximum CPU load
+                    let reverb = AVAudioUnitReverb()
+                    reverb.loadFactoryPreset(.cathedral)
+                    reverb.wetDryMix = 40
+                    engine.attach(reverb)
+                    
+                    let delay = AVAudioUnitDelay()
+                    delay.delayTime = 0.3
+                    delay.feedback = 60
+                    delay.wetDryMix = 25
+                    engine.attach(delay)
+                    
+                    let distortion = AVAudioUnitDistortion()
+                    distortion.loadFactoryPreset(.multiDecimated4)
+                    distortion.wetDryMix = 20
+                    engine.attach(distortion)
+                    
+                    // 3D spatial audio processing for additional CPU load
+                    let spatialMixer = AVAudioEnvironmentNode()
+                    spatialMixer.listenerPosition = AVAudio3DPoint(x: 0, y: 0, z: 0)
+                    spatialMixer.listenerOrientation = AVAudio3DOrientation(forward: AVAudio3DVector(x: 0, y: 0, z: -1),
+                                                                            up: AVAudio3DVector(x: 0, y: 1, z: 0))
+                    engine.attach(spatialMixer)
+                    
+                    // Complex routing: source -> reverb -> delay -> distortion -> spatial -> mixer
+                    engine.connect(sourceNode, to: reverb, format: format)
+                    engine.connect(reverb, to: delay, format: format)
+                    engine.connect(delay, to: distortion, format: format)
+                    engine.connect(distortion, to: spatialMixer, format: format)
+                    engine.connect(spatialMixer, to: mainMixer, format: format)
+                    
+                    // Position audio sources in 3D space
+                    spatialMixer.position(for: sourceNode, at: AVAudio3DPoint(
+                        x: Float.random(in: -10...10),
+                        y: Float.random(in: -10...10), 
+                        z: Float.random(in: -10...10)
+                    ))
+                }
+                
+                engine.prepare()
+                do {
+                    try engine.start()
+                    self.audioEngines.append(engine)
+                    print("Started Enhanced Audio Engine \(engineIndex) with \(frequencies.count) oscillators + spatial audio")
+                } catch {
+                    print("Enhanced Audio Engine \(engineIndex) error: \(error)")
+                }
             }
-            
-            engine.attach(sourceNode)
-            
-            // Add effects for more CPU load
-            let reverb = AVAudioUnitReverb()
-            reverb.loadFactoryPreset(.cathedral)
-            reverb.wetDryMix = 50
-            engine.attach(reverb)
-            
-            let delay = AVAudioUnitDelay()
-            delay.delayTime = 0.2
-            delay.feedback = 50
-            delay.wetDryMix = 30
-            engine.attach(delay)
-            
-            // Connect: source -> reverb -> delay -> mixer
-            engine.connect(sourceNode, to: reverb, format: format)
-            engine.connect(reverb, to: delay, format: format)
-            engine.connect(delay, to: mainMixer, format: format)
         }
         
-        engine.prepare()
-        do {
-            try engine.start()
-            print("Started Enhanced Audio (Multiple Tones + Effects)")
-        } catch {
-            print("Enhanced Audio Engine error: \(error)")
-        }
-        }
+        print("Starting \(engineCount) Audio Engines with spatial processing")
+    }
+    
+    func stopEnhancedAudio() {
+        audioEngines.forEach { $0.stop() }
+        audioEngines.removeAll()
+        audioEngine?.stop()
+        audioEngine = nil
+        print("Stopped All Enhanced Audio Engines")
     }
     
     // MARK: Aggressive Memory Allocation
@@ -1084,6 +1545,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             await MainActor.run {
                 self.startLocationUpdates()
                 self.startBluetoothScanning()
+                self.startNFCScanning()
             }
             
             // Start camera and recording operations
@@ -1147,6 +1609,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
             await MainActor.run {
                 self.stopLocationUpdates()
                 self.stopBluetoothScanning()
+                self.stopNFCScanning()
                 self.stopMotionUpdates()
                 self.stopWiFiScanning()
                 self.stopBrightnessAndFlashlight()
@@ -1157,6 +1620,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
                 // Clean up audio
                 self.audioEngine?.stop()
                 self.audioEngine = nil
+                self.stopEnhancedAudio()
                 
                 self.stopMemoryPressure()
                 
