@@ -541,26 +541,42 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     func startNetworkRequests() {
         networkActive = true
         
-        // Enhanced simultaneous download operations for maximum network stress
-        let concurrentDownloads = aggressiveMode ? 8 : 4
-        
-        for i in 0..<concurrentDownloads {
+        if aggressiveMode {
+            // Enhanced simultaneous download operations for maximum network stress
+            let concurrentDownloads = 8
+            
+            for i in 0..<concurrentDownloads {
+                Task.detached(priority: .userInitiated) { [weak self] in
+                    guard let self = self else { return }
+                    let interval = 0.3
+                    print("Download task \(i) started. Interval: \(interval)s, Aggressive: \(self.aggressiveMode)")
+
+                    while self.networkActive {
+                        await self.makeNetworkRequest()
+                        try? await Task.sleep(for: .seconds(interval))
+                    }
+
+                    print("Download task \(i) ended.")
+                }
+            }
+            
+            // Add WebSocket streaming for continuous high-frequency data (aggressive mode only)
+            startWebSocketStreaming()
+        } else {
+            // Original sequential download loop for regular mode
             Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self = self else { return }
-                let interval = self.aggressiveMode ? 0.3 : 1.0
-                print("Download task \(i) started. Interval: \(interval)s, Aggressive: \(self.aggressiveMode)")
+                let interval = 1.5
+                print("Download loop started. Interval: \(interval)s, Aggressive: \(self.aggressiveMode)")
 
                 while self.networkActive {
                     await self.makeNetworkRequest()
                     try? await Task.sleep(for: .seconds(interval))
                 }
 
-                print("Download task \(i) ended.")
+                print("Download loop ended.")
             }
         }
-        
-        // Add WebSocket streaming for continuous high-frequency data
-        startWebSocketStreaming()
     }
 
     private func addDownloadTask() {
@@ -658,21 +674,37 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     func startUploadRequests() {
         networkActive = true
         
-        // Enhanced simultaneous upload operations for maximum network stress
-        let concurrentUploads = aggressiveMode ? 8 : 4
-        
-        for i in 0..<concurrentUploads {
+        if aggressiveMode {
+            // Enhanced simultaneous upload operations for maximum network stress
+            let concurrentUploads = 8
+            
+            for i in 0..<concurrentUploads {
+                Task.detached(priority: .userInitiated) { [weak self] in
+                    guard let self = self else { return }
+                    let interval = 0.3
+                    print("Upload task \(i) started. Interval: \(interval)s, Aggressive: \(self.aggressiveMode)")
+
+                    while self.networkActive {
+                        await self.makeUploadRequest()
+                        try? await Task.sleep(for: .seconds(interval))
+                    }
+
+                    print("Upload task \(i) ended.")
+                }
+            }
+        } else {
+            // Original sequential upload loop for regular mode
             Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self = self else { return }
-                let interval = self.aggressiveMode ? 0.3 : 1.0
-                print("Upload task \(i) started. Interval: \(interval)s, Aggressive: \(self.aggressiveMode)")
+                let interval = 1.5
+                print("Upload loop started. Interval: \(interval)s, Aggressive: \(self.aggressiveMode)")
 
                 while self.networkActive {
                     await self.makeUploadRequest()
                     try? await Task.sleep(for: .seconds(interval))
                 }
 
-                print("Upload task \(i) ended.")
+                print("Upload loop ended.")
             }
         }
     }
@@ -688,10 +720,15 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
     private var webSocketTasks: [URLSessionWebSocketTask] = []
     
     private func startWebSocketStreaming() {
-        // Create multiple WebSocket connections for maximum network utilization
-        let connectionCount = aggressiveMode ? 6 : 3
+        // WebSocket streaming for aggressive mode only - provides continuous high-frequency data transfer
+        // that maintains persistent connections while generating maximum network interface utilization
+        guard aggressiveMode else { return }
+        
+        let connectionCount = 6
         
         for i in 0..<connectionCount {
+            // TODO: Replace with your custom WebSocket server URL
+            // Current URL is a test echo server - replace with: "ws://YOUR_SERVER_IP:YOUR_PORT"
             guard let url = URL(string: "wss://echo.websocket.org") else { continue }
             
             let task = URLSession.shared.webSocketTask(with: url)
@@ -713,7 +750,7 @@ class BatteryDrainer: NSObject, CLLocationManagerDelegate, CBCentralManagerDeleg
                         break
                     }
                     
-                    // High frequency streaming
+                    // High frequency streaming - 20 messages per second
                     try? await Task.sleep(for: .milliseconds(50))
                 }
             }
