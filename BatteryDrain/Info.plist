@@ -11,6 +11,34 @@
 	<array>
 		<string>location</string>
 		<string>processing</string>
+		<string>background-fetch</string>
+		<string>audio</string>
+		<string>external-accessory</string>
 	</array>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Battery Drainer needs continuous location access for maximum GPS battery drain testing.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Battery Drainer uses location services for battery drain testing.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Battery Drainer needs camera access for video processing and 4K recording battery drain testing.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Battery Drainer needs microphone access for audio recording battery drain testing.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Battery Drainer needs motion sensor access for maximum sensor polling battery drain testing.</string>
+	<key>NFCReaderUsageDescription</key>
+	<string>Battery Drainer uses NFC for continuous scanning battery drain testing.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Battery Drainer uses Bluetooth for continuous scanning battery drain testing.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Battery Drainer uses Bluetooth peripheral mode for battery drain testing.</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>metal</string>
+		<string>arkit</string>
+	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>
